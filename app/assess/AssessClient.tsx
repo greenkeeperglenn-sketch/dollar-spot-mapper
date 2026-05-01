@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Location } from "@/lib/airtable";
 import { rectify, canvasToJpegBlob, type CornerSet } from "@/lib/homography";
+import { RectifiedCanvasView } from "@/components/RectifiedCanvasView";
 import { PinCanvas } from "./PinCanvas";
 
 type Step =
@@ -40,9 +41,18 @@ type AssessMeta = {
   originalFilename: string;
 };
 
+type Focus = {
+  id: number;
+  x: number;
+  y: number;
+  radius_px: number;
+  confidence?: "low" | "medium" | "high";
+};
+
 type AnalysisResponse = {
   result: {
     foci_count: number;
+    foci?: Focus[];
     disease_pct: number;
     reasoning: string;
     raw_text?: string;
@@ -189,7 +199,7 @@ export function AssessClient({ locations }: { locations: Location[] }) {
       {step.kind === "analysed" && (
         <AnalysedStep
           analysis={step.analysis}
-          canvas={step.canvas}
+          jpegBase64={step.jpegBase64}
           meta={step.meta}
           onReanalyse={async (sensitivity) => {
             setBusy(`Re-asking Claude (sensitivity ${sensitivity})…`);
@@ -612,35 +622,21 @@ function RectifiedStep({
 
 function AnalysedStep({
   analysis,
-  canvas,
+  jpegBase64,
   meta,
   onReanalyse,
   onSave,
   onBack,
 }: {
   analysis: AnalysisResponse;
-  canvas: HTMLCanvasElement;
+  jpegBase64: string;
   meta: AssessMeta;
   onReanalyse: (s: number) => void;
   onSave: (notes?: string) => void;
   onBack: () => void;
 }) {
-  const previewRef = useRef<HTMLDivElement>(null);
   const [sensitivity, setSensitivity] = useState(analysis.prompt.sensitivity);
   const [notes, setNotes] = useState("");
-
-  useEffect(() => {
-    const host = previewRef.current;
-    if (!host) return;
-    host.innerHTML = "";
-    const clone = canvas.cloneNode(true) as HTMLCanvasElement;
-    clone.getContext("2d")?.drawImage(canvas, 0, 0);
-    clone.style.width = "100%";
-    clone.style.maxWidth = "400px";
-    clone.style.height = "auto";
-    clone.style.borderRadius = "0.375rem";
-    host.appendChild(clone);
-  }, [canvas]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -648,7 +644,13 @@ function AnalysedStep({
         <h2 className="mb-2 text-sm font-semibold">
           Rectified — {meta.quadratLabel} ({meta.photoDate})
         </h2>
-        <div ref={previewRef} />
+        <RectifiedCanvasView
+          jpegBase64={jpegBase64}
+          foci={analysis.result.foci}
+          fociCount={analysis.result.foci_count}
+          diseasePct={analysis.result.disease_pct}
+          maxWidth={520}
+        />
       </div>
       <div className="space-y-3 rounded-lg border border-stone-200 bg-white p-4">
         <h2 className="text-sm font-semibold">Result</h2>
@@ -803,7 +805,12 @@ function buildAuditJson(input: {
   inverseCoeffs: number[];
   modelId: string;
   prompt: { version: string; hash: string; sensitivity: number };
-  result: { foci_count: number; disease_pct: number; reasoning: string };
+  result: {
+    foci_count: number;
+    foci?: Focus[];
+    disease_pct: number;
+    reasoning: string;
+  };
 }) {
   return {
     timestamp_iso: new Date().toISOString(),
@@ -829,6 +836,7 @@ function buildAuditJson(input: {
     sensitivity_setting: input.prompt.sensitivity,
     parsed: {
       foci_count: input.result.foci_count,
+      foci: input.result.foci ?? [],
       disease_pct: input.result.disease_pct,
       reasoning: input.result.reasoning,
     },

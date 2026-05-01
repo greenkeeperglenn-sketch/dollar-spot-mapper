@@ -9,7 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
 export const ANTHROPIC_MODEL_ID =
   process.env.ANTHROPIC_MODEL_ID ?? "claude-sonnet-4-6";
 
-export const PROMPT_VERSION = "foci-count-v1";
+export const PROMPT_VERSION = "foci-count-v2";
 
 const SENSITIVITY_INSTRUCTIONS: Record<number, string> = {
   1: "Sensitivity 1 (strict): Count only large (>2 cm), unambiguous, fully-formed dollar spot foci. Ignore anything faint or borderline.",
@@ -23,7 +23,7 @@ let cachedTemplate: string | null = null;
 
 function loadTemplate(): string {
   if (cachedTemplate) return cachedTemplate;
-  const path = join(process.cwd(), "prompts", "foci-count-v1.md");
+  const path = join(process.cwd(), "prompts", `${PROMPT_VERSION}.md`);
   cachedTemplate = readFileSync(path, "utf8");
   return cachedTemplate;
 }
@@ -50,8 +50,17 @@ export function buildPrompt(sensitivity: number): BuiltPrompt {
   };
 }
 
+export type Focus = {
+  id: number;
+  x: number;
+  y: number;
+  radius_px: number;
+  confidence?: "low" | "medium" | "high";
+};
+
 export type AnalysisResult = {
   foci_count: number;
+  foci: Focus[];
   disease_pct: number;
   reasoning: string;
   raw_text: string;
@@ -68,7 +77,7 @@ export async function analyseRectifiedJpeg(
   const prompt = buildPrompt(sensitivity);
   const message = await client.messages.create({
     model: ANTHROPIC_MODEL_ID,
-    max_tokens: 1024,
+    max_tokens: 4096,
     messages: [
       {
         role: "user",
@@ -98,8 +107,13 @@ export async function analyseRectifiedJpeg(
   };
 }
 
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
 function parseAnalysis(text: string): {
   foci_count: number;
+  foci: Focus[];
   disease_pct: number;
   reasoning: string;
 } {
@@ -113,12 +127,53 @@ function parseAnalysis(text: string): {
   }
   const obj = JSON.parse(match[0]) as {
     foci_count?: number;
+    foci?: Array<{
+      id?: number;
+      x?: number;
+      y?: number;
+      radius_px?: number;
+      confidence?: string;
+    }>;
     disease_pct?: number;
     reasoning?: string;
   };
+
+  const foci: Focus[] = [];
+  if (Array.isArray(obj.foci)) {
+    for (let i = 0; i < obj.foci.length; i++) {
+      const f = obj.foci[i];
+      const x = Number(f.x);
+      const y = Number(f.y);
+      const r = Number(f.radius_px);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(r)) {
+        continue;
+      }
+      const focus: Focus = {
+        id: Number.isFinite(Number(f.id)) ? Number(f.id) : i + 1,
+        x: clamp(Math.round(x), 0, 1000),
+        y: clamp(Math.round(y), 0, 1000),
+        radius_px: clamp(Math.round(r), 2, 250),
+      };
+      if (
+        f.confidence === "low" ||
+        f.confidence === "medium" ||
+        f.confidence === "high"
+      ) {
+        focus.confidence = f.confidence;
+      }
+      foci.push(focus);
+    }
+  }
+
+  // Prefer the model's explicit count, but if it's clearly missing fall back
+  // to the array length so the UI shows something coherent.
+  const reportedCount = Math.max(0, Math.round(Number(obj.foci_count ?? NaN)));
+  const foci_count = Number.isFinite(reportedCount) ? reportedCount : foci.length;
+
   return {
-    foci_count: Math.max(0, Math.round(Number(obj.foci_count ?? 0))),
-    disease_pct: Math.max(0, Math.min(100, Number(obj.disease_pct ?? 0))),
+    foci_count,
+    foci,
+    disease_pct: clamp(Number(obj.disease_pct ?? 0), 0, 100),
     reasoning: String(obj.reasoning ?? ""),
   };
 }
