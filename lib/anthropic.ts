@@ -9,21 +9,21 @@ import Anthropic from "@anthropic-ai/sdk";
 export const ANTHROPIC_MODEL_ID =
   process.env.ANTHROPIC_MODEL_ID ?? "claude-sonnet-4-6";
 
-export const PROMPT_VERSION = "folky-count-v1";
+export const PROMPT_VERSION = "foci-count-v1";
 
 const SENSITIVITY_INSTRUCTIONS: Record<number, string> = {
-  1: "Sensitivity 1 (strict): Count only large (>2 cm), unambiguous, fully-formed dollar spot lesions. Ignore anything faint or borderline.",
-  2: "Sensitivity 2: Count obvious dollar spot lesions; skip very faint or partial ones.",
-  3: "Sensitivity 3 (default): Count clearly visible dollar spot infection points.",
-  4: "Sensitivity 4: Count clearly visible lesions plus moderately confident borderline cases.",
-  5: "Sensitivity 5 (permissive): Count all possible infection points, including faint or early-stage lesions.",
+  1: "Sensitivity 1 (strict): Count only large (>2 cm), unambiguous, fully-formed dollar spot foci. Ignore anything faint or borderline.",
+  2: "Sensitivity 2: Count obvious dollar spot foci; skip very faint or partial ones.",
+  3: "Sensitivity 3 (default): Count clearly visible dollar spot foci.",
+  4: "Sensitivity 4: Count clearly visible foci plus moderately confident borderline cases.",
+  5: "Sensitivity 5 (permissive): Count all possible foci, including faint or early-stage lesions.",
 };
 
 let cachedTemplate: string | null = null;
 
 function loadTemplate(): string {
   if (cachedTemplate) return cachedTemplate;
-  const path = join(process.cwd(), "prompts", "folky-count-v1.md");
+  const path = join(process.cwd(), "prompts", "foci-count-v1.md");
   cachedTemplate = readFileSync(path, "utf8");
   return cachedTemplate;
 }
@@ -51,7 +51,7 @@ export function buildPrompt(sensitivity: number): BuiltPrompt {
 }
 
 export type AnalysisResult = {
-  folky_count: number;
+  foci_count: number;
   disease_pct: number;
   reasoning: string;
   raw_text: string;
@@ -99,7 +99,7 @@ export async function analyseRectifiedJpeg(
 }
 
 function parseAnalysis(text: string): {
-  folky_count: number;
+  foci_count: number;
   disease_pct: number;
   reasoning: string;
 } {
@@ -112,12 +112,12 @@ function parseAnalysis(text: string): {
     throw new Error(`No JSON object in model response: ${text.slice(0, 200)}`);
   }
   const obj = JSON.parse(match[0]) as {
-    folky_count?: number;
+    foci_count?: number;
     disease_pct?: number;
     reasoning?: string;
   };
   return {
-    folky_count: Math.max(0, Math.round(Number(obj.folky_count ?? 0))),
+    foci_count: Math.max(0, Math.round(Number(obj.foci_count ?? 0))),
     disease_pct: Math.max(0, Math.min(100, Number(obj.disease_pct ?? 0))),
     reasoning: String(obj.reasoning ?? ""),
   };

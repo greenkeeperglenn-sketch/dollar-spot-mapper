@@ -42,7 +42,7 @@ type AssessMeta = {
 
 type AnalysisResponse = {
   result: {
-    folky_count: number;
+    foci_count: number;
     disease_pct: number;
     reasoning: string;
     raw_text?: string;
@@ -653,7 +653,7 @@ function AnalysedStep({
       <div className="space-y-3 rounded-lg border border-stone-200 bg-white p-4">
         <h2 className="text-sm font-semibold">Result</h2>
         <div className="grid grid-cols-2 gap-3">
-          <Stat label="Folkies" value={String(analysis.result.folky_count)} />
+          <Stat label="Foci" value={String(analysis.result.foci_count)} />
           <Stat
             label="Disease coverage"
             value={`${analysis.result.disease_pct.toFixed(1)}%`}
@@ -803,7 +803,7 @@ function buildAuditJson(input: {
   inverseCoeffs: number[];
   modelId: string;
   prompt: { version: string; hash: string; sensitivity: number };
-  result: { folky_count: number; disease_pct: number; reasoning: string };
+  result: { foci_count: number; disease_pct: number; reasoning: string };
 }) {
   return {
     timestamp_iso: new Date().toISOString(),
@@ -828,7 +828,7 @@ function buildAuditJson(input: {
     prompt_hash: input.prompt.hash,
     sensitivity_setting: input.prompt.sensitivity,
     parsed: {
-      folky_count: input.result.folky_count,
+      foci_count: input.result.foci_count,
       disease_pct: input.result.disease_pct,
       reasoning: input.result.reasoning,
     },

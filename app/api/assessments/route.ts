@@ -14,7 +14,7 @@ type Body = {
   sensitivity: number;
   rectifiedJpegBase64: string;
   audit: Record<string, unknown>;
-  result: { folky_count: number; disease_pct: number; reasoning?: string };
+  result: { foci_count: number; disease_pct: number; reasoning?: string };
   notes?: string;
 };
 
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
         quadrat_label: body.quadrat_label,
         rectified_image_url: jpegBlob.url,
         audit_json_url: auditBlob.url,
-        folky_count: body.result.folky_count,
+        foci_count: body.result.foci_count,
         disease_pct: body.result.disease_pct,
         sensitivity: body.sensitivity,
         notes: body.notes,

@@ -56,7 +56,7 @@ export type PhotoAssessment = {
   quadrat_label: string;
   rectified_image_url: string;
   audit_json_url: string;
-  folky_count: number;
+  foci_count: number;
   disease_pct: number;
   sensitivity: number;
   notes?: string;
@@ -422,7 +422,7 @@ type PhotoFields = {
   quadrat_label?: string;
   rectified_image_url?: string;
   audit_json_url?: string;
-  folky_count?: number;
+  foci_count?: number;
   disease_pct?: number;
   sensitivity?: number;
   notes?: string;
@@ -436,7 +436,7 @@ function rowToPhoto(r: AirtableRecord<PhotoFields>): PhotoAssessment {
     quadrat_label: r.fields.quadrat_label ?? "Q1",
     rectified_image_url: r.fields.rectified_image_url ?? "",
     audit_json_url: r.fields.audit_json_url ?? "",
-    folky_count: r.fields.folky_count ?? 0,
+    foci_count: r.fields.foci_count ?? 0,
     disease_pct: r.fields.disease_pct ?? 0,
     sensitivity: r.fields.sensitivity ?? 3,
     notes: r.fields.notes,
@@ -459,7 +459,7 @@ export async function createPhotoAssessment(input: {
   quadrat_label: string;
   rectified_image_url: string;
   audit_json_url: string;
-  folky_count: number;
+  foci_count: number;
   disease_pct: number;
   sensitivity: number;
   notes?: string;
@@ -475,7 +475,7 @@ export async function createPhotoAssessment(input: {
           quadrat_label: input.quadrat_label,
           rectified_image_url: input.rectified_image_url,
           audit_json_url: input.audit_json_url,
-          folky_count: input.folky_count,
+          foci_count: input.foci_count,
           disease_pct: input.disease_pct,
           sensitivity: input.sensitivity,
           notes: input.notes,

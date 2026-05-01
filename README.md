@@ -77,7 +77,7 @@ and must match exactly.
 | `quadrat_label` | Single line text (default `Q1`) |
 | `rectified_image_url` | URL |
 | `audit_json_url` | URL |
-| `folky_count` | Number |
+| `foci_count` | Number |
 | `disease_pct` | Number |
 | `sensitivity` | Number |
 | `notes` | Long text |
@@ -127,7 +127,7 @@ lib/
   anthropic.ts                      vision client + prompt builder + hashing
   dates.ts                          ISO date helpers
 prompts/
-  folky-count-v1.md                 versioned + hashed into every audit JSON
+  foci-count-v1.md                  versioned + hashed into every audit JSON
 tests/
   smith-kerns.test.ts               13 cases — published values + monotonicity
 ```
@@ -167,7 +167,7 @@ prompt in the future.
    precision; pins are draggable after placement.
 4. **Rectify** — WebGL fragment shader applies the inverse homography to
    produce a 1000 × 1000 px square (1 px = 1 mm).
-5. **Analyse** — Claude Sonnet returns a folky count + disease %. A
+5. **Analyse** — Claude Sonnet returns a foci count + disease %. A
    sensitivity slider (1 strict → 5 permissive) tunes the prompt.
 6. **Save** — rectified JPEG and audit JSON go to Vercel Blob, and a
    `PhotoAssessments` row is written.

@@ -33,7 +33,7 @@ export function LocationHistory({
       .map(([date, list]) => ({
         date,
         list,
-        meanFolky: list.reduce((s, p) => s + p.folky_count, 0) / list.length,
+        meanFoci: list.reduce((s, p) => s + p.foci_count, 0) / list.length,
         meanPct: list.reduce((s, p) => s + p.disease_pct, 0) / list.length,
       }))
       .sort((a, b) => a.date.localeCompare(b.date));
@@ -109,19 +109,19 @@ function PhotosTimeline({
   const scatterPoints = groups.flatMap((g) =>
     g.list.map((p) => ({
       label: shortDate(g.date),
-      folky: p.folky_count,
+      foci: p.foci_count,
       quadrat: p.quadrat_label,
     }))
   );
   const meanLine = groups.map((g) => ({
     label: shortDate(g.date),
-    mean: Number(g.meanFolky.toFixed(2)),
+    mean: Number(g.meanFoci.toFixed(2)),
   }));
   // Merge by label so the line and scatter share an x-axis
   const merged: Array<{
     label: string;
     mean?: number;
-    folky?: number;
+    foci?: number;
     quadrat?: string;
   }> = [];
   const seen = new Set<string>();
@@ -135,7 +135,7 @@ function PhotosTimeline({
   // sort by date roughly via group order
   return (
     <Card
-      title="Folky count over time"
+      title="Foci count over time"
       subtitle="Line = location-level mean across all quadrats on that date. Dots = individual quadrats."
     >
       <ResponsiveContainer width="100%" height={240}>
@@ -154,7 +154,7 @@ function PhotosTimeline({
             dot={{ r: 3 }}
             connectNulls
           />
-          <Scatter dataKey="folky" name="Per quadrat" fill="#0284c7" />
+          <Scatter dataKey="foci" name="Per quadrat" fill="#0284c7" />
         </ComposedChart>
       </ResponsiveContainer>
     </Card>
@@ -174,7 +174,7 @@ function PhotosTable({
           <tr>
             <th className="px-2 py-1">Date</th>
             <th className="px-2 py-1">Quadrats</th>
-            <th className="px-2 py-1">Mean folky</th>
+            <th className="px-2 py-1">Mean foci</th>
             <th className="px-2 py-1">Mean disease %</th>
             <th className="px-2 py-1">Per quadrat</th>
             <th className="px-2 py-1"></th>
@@ -188,12 +188,12 @@ function PhotosTable({
               <tr key={g.date} className="border-t border-stone-100 align-top">
                 <td className="px-2 py-2 font-medium">{g.date}</td>
                 <td className="px-2 py-2">{g.list.length}</td>
-                <td className="px-2 py-2 tabular-nums">{g.meanFolky.toFixed(1)}</td>
+                <td className="px-2 py-2 tabular-nums">{g.meanFoci.toFixed(1)}</td>
                 <td className="px-2 py-2 tabular-nums">{g.meanPct.toFixed(1)}%</td>
                 <td className="px-2 py-2 text-xs text-stone-600">
                   {g.list.map((p) => (
                     <div key={p.id}>
-                      <strong>{p.quadrat_label}:</strong> {p.folky_count} folkies,{" "}
+                      <strong>{p.quadrat_label}:</strong> {p.foci_count} foci,{" "}
                       {p.disease_pct.toFixed(1)}%
                       <a
                         href={p.rectified_image_url}
@@ -258,7 +258,7 @@ function groupShape() {
   return [] as Array<{
     date: string;
     list: PhotoAssessment[];
-    meanFolky: number;
+    meanFoci: number;
     meanPct: number;
   }>;
 }
