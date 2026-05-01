@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listPressureForLocation } from "@/lib/airtable";
+import { jsonRoute } from "@/lib/api-helpers";
 import { addDays, todayUTC } from "@/lib/dates";
 
 export const runtime = "nodejs";
@@ -14,6 +15,10 @@ export async function GET(req: Request) {
   }
   const days = daysParam ? Math.max(1, Math.min(365, Number(daysParam))) : 30;
   const since = addDays(todayUTC(), -days);
-  const scores = await listPressureForLocation(locationId, { sinceDate: since });
-  return NextResponse.json({ scores });
+  return jsonRoute(
+    async () => ({
+      scores: await listPressureForLocation(locationId, { sinceDate: since }),
+    }),
+    { context: `GET /api/pressure?locationId=${locationId}` }
+  );
 }

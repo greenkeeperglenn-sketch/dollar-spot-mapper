@@ -4,6 +4,17 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Location } from "@/lib/airtable";
 
+async function readError(res: Response, fallback: string): Promise<string> {
+  const text = await res.text();
+  try {
+    const j = JSON.parse(text) as { error?: string; where?: string };
+    if (j.error) return j.where ? `${j.error} (${j.where})` : j.error;
+  } catch {
+    // not JSON
+  }
+  return text.slice(0, 500) || `${fallback} (HTTP ${res.status})`;
+}
+
 export function LocationsClient({ initial }: { initial: Location[] }) {
   const [locations, setLocations] = useState(initial);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -32,7 +43,7 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
-      setError(`Create failed: ${await res.text()}`);
+      setError(`Create failed — ${await readError(res, "Create failed")}`);
       return;
     }
     await refresh();
@@ -46,7 +57,7 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
       body: JSON.stringify(patch),
     });
     if (!res.ok) {
-      setError(`Update failed: ${await res.text()}`);
+      setError(`Update failed — ${await readError(res, "Update failed")}`);
       return;
     }
     setEditingId(null);
@@ -57,7 +68,7 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
     if (!confirm("Delete this location? Weather and pressure history stay.")) return;
     const res = await fetch(`/api/locations/${id}`, { method: "DELETE" });
     if (!res.ok) {
-      setError(`Delete failed: ${await res.text()}`);
+      setError(`Delete failed — ${await readError(res, "Delete failed")}`);
       return;
     }
     await refresh();
@@ -69,7 +80,7 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
       method: "POST",
     });
     if (!res.ok) {
-      setError(`Backfill failed: ${await res.text()}`);
+      setError(`Backfill failed — ${await readError(res, "Backfill failed")}`);
       return;
     }
     const summary = await res.json();

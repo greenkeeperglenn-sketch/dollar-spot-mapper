@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getLocation } from "@/lib/airtable";
+import { jsonRoute } from "@/lib/api-helpers";
 import { backfillLocation } from "@/lib/weather-pipeline";
 
 export const runtime = "nodejs";
@@ -12,10 +13,12 @@ export async function POST(req: Request) {
   if (!locationId) {
     return NextResponse.json({ error: "locationId required" }, { status: 400 });
   }
-  const loc = await getLocation(locationId);
-  if (!loc) {
-    return NextResponse.json({ error: "location not found" }, { status: 404 });
-  }
-  const summary = await backfillLocation(loc);
-  return NextResponse.json(summary);
+  return jsonRoute(
+    async () => {
+      const loc = await getLocation(locationId);
+      if (!loc) throw new Error(`Location ${locationId} not found`);
+      return await backfillLocation(loc);
+    },
+    { context: `POST /api/weather/backfill?locationId=${locationId}` }
+  );
 }

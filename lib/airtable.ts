@@ -99,7 +99,23 @@ async function request<T>(
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Airtable ${res.status}: ${body}`);
+    // Airtable's JSON errors look like {"error":{"type":"...","message":"..."}}.
+    // Extract the message so the surfaced error is human-readable.
+    let pretty = body;
+    try {
+      const j = JSON.parse(body) as {
+        error?: string | { type?: string; message?: string };
+      };
+      if (typeof j.error === "string") pretty = j.error;
+      else if (j.error?.message) {
+        pretty = j.error.type
+          ? `${j.error.type}: ${j.error.message}`
+          : j.error.message;
+      }
+    } catch {
+      // body wasn't JSON; keep raw
+    }
+    throw new Error(`Airtable ${res.status} on ${path}: ${pretty}`);
   }
   return res.json() as Promise<T>;
 }

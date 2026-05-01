@@ -4,14 +4,17 @@ import {
   listLocations,
   type Location,
 } from "@/lib/airtable";
+import { jsonRoute } from "@/lib/api-helpers";
 import { backfillLocation } from "@/lib/weather-pipeline";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const rows = await listLocations();
-  return NextResponse.json({ locations: rows });
+  return jsonRoute(
+    async () => ({ locations: await listLocations() }),
+    { context: "GET /api/locations" }
+  );
 }
 
 type CreateBody = {
@@ -23,7 +26,15 @@ type CreateBody = {
 };
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as CreateBody;
+  let body: CreateBody;
+  try {
+    body = (await req.json()) as CreateBody;
+  } catch {
+    return NextResponse.json(
+      { error: "Body must be JSON" },
+      { status: 400 }
+    );
+  }
   if (
     !body.name ||
     typeof body.latitude !== "number" ||
@@ -34,19 +45,22 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
-  const loc: Location = await createLocation({
-    name: body.name,
-    latitude: body.latitude,
-    longitude: body.longitude,
-    notes: body.notes,
-    active: body.active ?? true,
-  });
 
-  // Fire-and-forget the backfill so the request returns quickly.
-  // Errors are logged; the user can re-run via the locations page if needed.
-  void backfillLocation(loc).catch((err) => {
-    console.error(`backfill failed for ${loc.id}`, err);
-  });
-
-  return NextResponse.json({ location: loc, backfillStarted: true });
+  return jsonRoute(
+    async () => {
+      const loc: Location = await createLocation({
+        name: body.name!,
+        latitude: body.latitude!,
+        longitude: body.longitude!,
+        notes: body.notes,
+        active: body.active ?? true,
+      });
+      // Fire-and-forget the backfill so the request returns quickly.
+      void backfillLocation(loc).catch((err) => {
+        console.error(`backfill failed for ${loc.id}`, err);
+      });
+      return { location: loc, backfillStarted: true };
+    },
+    { context: "POST /api/locations" }
+  );
 }
