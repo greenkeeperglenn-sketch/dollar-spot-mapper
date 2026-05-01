@@ -2,33 +2,57 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import type { Location, PressureScore } from "@/lib/airtable";
+import type { Location, PhotoAssessment, PressureScore } from "@/lib/airtable";
+import { PhotoTrendPanels } from "@/components/PhotoTrendPanels";
 import { PressurePanels } from "@/components/PressurePanels";
+
+async function readError(res: Response): Promise<string> {
+  const text = await res.text();
+  try {
+    const j = JSON.parse(text) as { error?: string; where?: string };
+    if (j.error) return j.where ? `${j.error} (${j.where})` : j.error;
+  } catch {
+    /* fallthrough */
+  }
+  return text.slice(0, 500) || `HTTP ${res.status}`;
+}
 
 export function DashboardClient({ locations }: { locations: Location[] }) {
   const active = useMemo(() => locations.filter((l) => l.active), [locations]);
   const [selectedId, setSelectedId] = useState<string>(active[0]?.id ?? "");
   const [scores, setScores] = useState<PressureScore[] | null>(null);
+  const [photos, setPhotos] = useState<PhotoAssessment[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedId) {
       setScores(null);
+      setPhotos(null);
       return;
     }
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/pressure?locationId=${selectedId}&days=30`, {
-      cache: "no-store",
-    })
-      .then(async (r) => {
-        if (!r.ok) throw new Error(await r.text());
-        return r.json();
-      })
-      .then((d) => {
-        if (!cancelled) setScores(d.scores as PressureScore[]);
+
+    Promise.all([
+      fetch(`/api/pressure?locationId=${selectedId}&days=30`, {
+        cache: "no-store",
+      }).then(async (r) => {
+        if (!r.ok) throw new Error(await readError(r));
+        return (await r.json()) as { scores: PressureScore[] };
+      }),
+      fetch(`/api/photos?locationId=${selectedId}`, {
+        cache: "no-store",
+      }).then(async (r) => {
+        if (!r.ok) throw new Error(await readError(r));
+        return (await r.json()) as { photos: PhotoAssessment[] };
+      }),
+    ])
+      .then(([p, ph]) => {
+        if (cancelled) return;
+        setScores(p.scores);
+        setPhotos(ph.photos);
       })
       .catch((e) => {
         if (!cancelled) setError(String(e));
@@ -97,6 +121,7 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
       )}
 
       {scores && scores.length > 0 && <PressurePanels scores={scores} />}
+      {photos && <PhotoTrendPanels photos={photos} />}
     </div>
   );
 }
