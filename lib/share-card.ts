@@ -46,8 +46,17 @@ export async function buildShareCard(input: ShareCardInput): Promise<Blob> {
   ctx.scale(SCALE, SCALE);
   ctx.imageSmoothingEnabled = true;
 
+  // Best-effort logo load — if it 404s for any reason we still produce a
+  // valid card without it.
+  let logo: HTMLImageElement | null = null;
+  try {
+    logo = await loadImage("/stri-logo.png");
+  } catch {
+    logo = null;
+  }
+
   drawBackground(ctx);
-  drawHeader(ctx, input);
+  drawHeader(ctx, input, logo);
   drawStatTiles(ctx, input);
   drawChart(ctx, input);
   drawFooter(ctx);
@@ -60,12 +69,26 @@ export async function buildShareCard(input: ShareCardInput): Promise<Blob> {
   });
 }
 
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`failed to load ${src}`));
+    img.src = src;
+  });
+}
+
 function drawBackground(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, W, H);
 }
 
-function drawHeader(ctx: CanvasRenderingContext2D, input: ShareCardInput) {
+function drawHeader(
+  ctx: CanvasRenderingContext2D,
+  input: ShareCardInput,
+  logo: HTMLImageElement | null
+) {
   ctx.fillStyle = "#1c1917";
   ctx.font = "bold 32px ui-sans-serif, system-ui, -apple-system, sans-serif";
   ctx.textAlign = "left";
@@ -76,16 +99,31 @@ function drawHeader(ctx: CanvasRenderingContext2D, input: ShareCardInput) {
   ctx.font = "16px ui-sans-serif, system-ui, sans-serif";
   ctx.fillText("Dollar spot pressure", 40, 72);
 
-  ctx.textAlign = "right";
-  ctx.fillStyle = "#78716c";
-  ctx.font = "14px ui-sans-serif, system-ui, sans-serif";
+  // Right side: STRI logo (if loaded) above the generated-on date.
   const today = new Date();
   const dateStr = today.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "long",
     year: "numeric",
   });
-  ctx.fillText(`Generated ${dateStr}`, W - 40, 36);
+
+  if (logo && logo.naturalWidth && logo.naturalHeight) {
+    const targetH = 56;
+    const ratio = logo.naturalWidth / logo.naturalHeight;
+    const drawW = targetH * ratio;
+    const x = W - 40 - drawW;
+    const y = 24;
+    ctx.drawImage(logo, x, y, drawW, targetH);
+    ctx.fillStyle = "#78716c";
+    ctx.font = "13px ui-sans-serif, system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`Generated ${dateStr}`, W - 40, y + targetH + 6);
+  } else {
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#78716c";
+    ctx.font = "14px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillText(`Generated ${dateStr}`, W - 40, 36);
+  }
 }
 
 function bandColours(band: string): { bg: string; border: string; fg: string } {
@@ -384,7 +422,7 @@ function drawFooter(ctx: CanvasRenderingContext2D) {
   ctx.textAlign = "right";
   ctx.textBaseline = "bottom";
   ctx.fillText(
-    "Smith-Kerns logistic-regression model · Dollar Spot Monitor",
+    "Smith-Kerns logistic-regression model · Dollar Spot Monitor · STRI",
     W - 40,
     H - 20
   );
