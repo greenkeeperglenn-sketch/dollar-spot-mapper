@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Location } from "@/lib/airtable";
 import { rectify, canvasToJpegBlob, type CornerSet } from "@/lib/homography";
 import { RectifiedCanvasView } from "@/components/RectifiedCanvasView";
+import { diseasePercentFromFoci } from "@/lib/foci-coverage";
 import { PinCanvas } from "./PinCanvas";
 
 type Step =
@@ -221,7 +222,7 @@ export function AssessClient({ locations }: { locations: Location[] }) {
               setBusy(null);
             }
           }}
-          onSave={async (notes) => {
+          onSave={async ({ foci, fociCount, diseasePct, notes }) => {
             setBusy("Saving to Airtable + Vercel Blob…");
             try {
               const audit = buildAuditJson({
@@ -234,6 +235,11 @@ export function AssessClient({ locations }: { locations: Location[] }) {
                 modelId: step.analysis.modelId,
                 prompt: step.analysis.prompt,
                 result: step.analysis.result,
+                userOverride: {
+                  foci,
+                  foci_count: fociCount,
+                  disease_pct: diseasePct,
+                },
               });
               const r = await fetch("/api/assessments", {
                 method: "POST",
@@ -245,7 +251,11 @@ export function AssessClient({ locations }: { locations: Location[] }) {
                   sensitivity: step.analysis.prompt.sensitivity,
                   rectifiedJpegBase64: step.jpegBase64,
                   audit,
-                  result: step.analysis.result,
+                  result: {
+                    foci_count: fociCount,
+                    disease_pct: diseasePct,
+                    reasoning: step.analysis.result.reasoning,
+                  },
                   notes,
                 }),
               });
@@ -632,11 +642,55 @@ function AnalysedStep({
   jpegBase64: string;
   meta: AssessMeta;
   onReanalyse: (s: number) => void;
-  onSave: (notes?: string) => void;
+  onSave: (input: {
+    foci: Focus[];
+    fociCount: number;
+    diseasePct: number;
+    notes?: string;
+  }) => void;
   onBack: () => void;
 }) {
   const [sensitivity, setSensitivity] = useState(analysis.prompt.sensitivity);
   const [notes, setNotes] = useState("");
+  const [editedFoci, setEditedFoci] = useState<Focus[]>(
+    analysis.result.foci ?? []
+  );
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  // Reset edits whenever a fresh analysis comes in (after re-analyse).
+  useEffect(() => {
+    setEditedFoci(analysis.result.foci ?? []);
+    setSelectedId(null);
+  }, [analysis]);
+
+  const editedCount = editedFoci.length;
+  const editedPct = useMemo(
+    () => diseasePercentFromFoci(editedFoci),
+    [editedFoci]
+  );
+
+  const wasEdited = !sameFoci(editedFoci, analysis.result.foci ?? []);
+  const selectedFocus = editedFoci.find((f) => f.id === selectedId) ?? null;
+
+  function updateSelectedRadius(r: number) {
+    if (selectedFocus == null) return;
+    setEditedFoci(
+      editedFoci.map((f) =>
+        f.id === selectedFocus.id ? { ...f, radius_px: r } : f
+      )
+    );
+  }
+
+  function removeSelected() {
+    if (selectedId == null) return;
+    setEditedFoci(editedFoci.filter((f) => f.id !== selectedId));
+    setSelectedId(null);
+  }
+
+  function resetToAi() {
+    setEditedFoci(analysis.result.foci ?? []);
+    setSelectedId(null);
+  }
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -646,23 +700,39 @@ function AnalysedStep({
         </h2>
         <RectifiedCanvasView
           jpegBase64={jpegBase64}
-          foci={analysis.result.foci}
-          fociCount={analysis.result.foci_count}
-          diseasePct={analysis.result.disease_pct}
+          foci={editedFoci}
+          fociCount={editedCount}
+          diseasePct={editedPct}
           maxWidth={520}
+          onFociChange={setEditedFoci}
+          selectedId={selectedId}
+          onSelectChange={setSelectedId}
         />
       </div>
       <div className="space-y-3 rounded-lg border border-stone-200 bg-white p-4">
         <h2 className="text-sm font-semibold">Result</h2>
         <div className="grid grid-cols-2 gap-3">
-          <Stat label="Foci" value={String(analysis.result.foci_count)} />
           <Stat
-            label="Disease coverage"
-            value={`${analysis.result.disease_pct.toFixed(1)}%`}
+            label={wasEdited ? "Foci (edited)" : "Foci"}
+            value={String(editedCount)}
+            sub={
+              wasEdited
+                ? `Claude said ${analysis.result.foci_count}`
+                : undefined
+            }
+          />
+          <Stat
+            label={wasEdited ? "Disease % (edited)" : "Disease coverage"}
+            value={`${editedPct.toFixed(1)}%`}
+            sub={
+              wasEdited
+                ? `Claude said ${analysis.result.disease_pct.toFixed(1)}%`
+                : undefined
+            }
           />
         </div>
         <p className="text-xs text-stone-600 leading-relaxed">
-          <span className="font-medium">Reasoning:</span>{" "}
+          <span className="font-medium">Claude's reasoning:</span>{" "}
           {analysis.result.reasoning || "(none)"}
         </p>
         <div className="text-xs text-stone-400">
@@ -671,9 +741,60 @@ function AnalysedStep({
           <code>{analysis.prompt.sensitivity}</code>
         </div>
 
+        <div className="rounded border border-stone-200 bg-stone-50 p-3">
+          <h3 className="text-xs font-semibold text-stone-700">Edit</h3>
+          {selectedFocus ? (
+            <div className="mt-2 space-y-2">
+              <div className="text-xs text-stone-600">
+                Selected focus: <strong>#{selectedFocus.id}</strong> at (
+                {selectedFocus.x}, {selectedFocus.y})
+              </div>
+              <label className="block text-xs text-stone-600">
+                Radius (mm)
+                <input
+                  type="range"
+                  min={3}
+                  max={120}
+                  step={1}
+                  value={selectedFocus.radius_px}
+                  onChange={(e) =>
+                    updateSelectedRadius(Number(e.target.value))
+                  }
+                  className="mt-1 w-full"
+                />
+                <div className="flex justify-between font-mono text-[11px] text-stone-500">
+                  <span>3</span>
+                  <span>{selectedFocus.radius_px}</span>
+                  <span>120</span>
+                </div>
+              </label>
+              <button
+                onClick={removeSelected}
+                className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+              >
+                Remove focus #{selectedFocus.id}
+              </button>
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-stone-500">
+              Click a focus to adjust its size or remove it. Click empty area
+              of the image to add a new focus. Disease grows in concentric
+              rings — drag the radius slider as the patches expand.
+            </p>
+          )}
+          {wasEdited && (
+            <button
+              onClick={resetToAi}
+              className="mt-2 rounded border border-stone-300 px-2 py-1 text-xs"
+            >
+              Reset to Claude's output
+            </button>
+          )}
+        </div>
+
         <div className="border-t border-stone-200 pt-3">
           <label className="block text-xs font-medium text-stone-600">
-            Re-analyse at different sensitivity
+            Re-analyse at different sensitivity (clears manual edits)
           </label>
           <input
             type="range"
@@ -717,7 +838,14 @@ function AnalysedStep({
             ← Back
           </button>
           <button
-            onClick={() => onSave(notes || undefined)}
+            onClick={() =>
+              onSave({
+                foci: editedFoci,
+                fociCount: editedCount,
+                diseasePct: editedPct,
+                notes: notes || undefined,
+              })
+            }
             className="ml-auto rounded bg-stone-900 px-4 py-1.5 text-sm text-white"
           >
             Save assessment
@@ -728,13 +856,37 @@ function AnalysedStep({
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function sameFoci(a: Focus[], b: Focus[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].id !== b[i].id ||
+      a[i].x !== b[i].x ||
+      a[i].y !== b[i].y ||
+      a[i].radius_px !== b[i].radius_px
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function Stat({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+}) {
   return (
     <div className="rounded bg-stone-50 p-2">
       <div className="text-xs uppercase tracking-wide text-stone-500">
         {label}
       </div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+      {sub && <div className="text-[10px] text-stone-500">{sub}</div>}
     </div>
   );
 }
@@ -811,6 +963,11 @@ function buildAuditJson(input: {
     disease_pct: number;
     reasoning: string;
   };
+  userOverride?: {
+    foci: Focus[];
+    foci_count: number;
+    disease_pct: number;
+  } | null;
 }) {
   return {
     timestamp_iso: new Date().toISOString(),
@@ -840,7 +997,7 @@ function buildAuditJson(input: {
       disease_pct: input.result.disease_pct,
       reasoning: input.result.reasoning,
     },
-    user_override: null,
+    user_override: input.userOverride ?? null,
   };
 }
 

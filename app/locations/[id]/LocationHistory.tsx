@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -11,6 +12,7 @@ import {
 } from "recharts";
 import type { PhotoAssessment, PressureScore } from "@/lib/airtable";
 import { PhotoTrendPanels } from "@/components/PhotoTrendPanels";
+import { StoredAssessmentReview } from "@/components/StoredAssessmentReview";
 import { groupPhotosByDate } from "@/lib/photo-aggregations";
 
 export function LocationHistory({
@@ -75,9 +77,11 @@ function PhotosTable({
 }: {
   groups: ReturnType<typeof groupPhotosByDate>;
 }) {
+  const [reviewing, setReviewing] = useState<PhotoAssessment | null>(null);
   if (groups.length === 0) return null;
   return (
-    <Card title="Per-date breakdown">
+    <>
+      <Card title="Per-date breakdown">
       <table className="w-full text-sm">
         <thead className="text-left text-xs uppercase text-stone-500">
           <tr>
@@ -101,22 +105,24 @@ function PhotosTable({
                 <td className="px-2 py-2 tabular-nums">{g.meanPct.toFixed(1)}%</td>
                 <td className="px-2 py-2 text-xs text-stone-600">
                   {g.list.map((p) => (
-                    <div key={p.id}>
-                      <strong>{p.quadrat_label}:</strong> {p.foci_count} foci,{" "}
-                      {p.disease_pct.toFixed(1)}%
-                      <a
-                        href={p.rectified_image_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="ml-2 text-blue-600 underline"
+                    <div key={p.id} className="flex flex-wrap items-center gap-2">
+                      <strong>{p.quadrat_label}:</strong>
+                      <span>
+                        {p.foci_count} foci, {p.disease_pct.toFixed(1)}%
+                      </span>
+                      <button
+                        onClick={() =>
+                          setReviewing(reviewing?.id === p.id ? null : p)
+                        }
+                        className="rounded border border-stone-300 px-2 py-0.5 text-[11px] hover:bg-stone-50"
                       >
-                        image
-                      </a>
+                        {reviewing?.id === p.id ? "Hide" : "View overlay"}
+                      </button>
                       <a
                         href={p.audit_json_url}
                         target="_blank"
                         rel="noreferrer"
-                        className="ml-2 text-blue-600 underline"
+                        className="text-[11px] text-blue-600 underline"
                       >
                         audit
                       </a>
@@ -129,6 +135,13 @@ function PhotosTable({
         </tbody>
       </table>
     </Card>
+    {reviewing && (
+      <StoredAssessmentReview
+        assessment={reviewing}
+        onClose={() => setReviewing(null)}
+      />
+    )}
+    </>
   );
 }
 
