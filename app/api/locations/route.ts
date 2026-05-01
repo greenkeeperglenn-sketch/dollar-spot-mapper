@@ -23,6 +23,7 @@ type CreateBody = {
   longitude?: number;
   notes?: string;
   active?: boolean;
+  sites?: string[];
 };
 
 export async function POST(req: Request) {
@@ -54,6 +55,7 @@ export async function POST(req: Request) {
         longitude: body.longitude!,
         notes: body.notes,
         active: body.active ?? true,
+        sites: body.sites,
       });
       // Fire-and-forget the backfill so the request returns quickly.
       void backfillLocation(loc).catch((err) => {

@@ -44,6 +44,7 @@ and must match exactly.
 | `longitude` | Number (decimal) |
 | `notes` | Long text |
 | `active` | Checkbox |
+| `sites` | Long text — optional, one site name per line (e.g. `Chipping green`, `11th tee`); these populate the Site dropdown when assessing a photo |
 
 #### `WeatherReadings`
 

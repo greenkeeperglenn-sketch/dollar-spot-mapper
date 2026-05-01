@@ -31,6 +31,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     longitude: number;
     notes: string;
     active: boolean;
+    sites: string[];
   }>;
   try {
     body = await req.json();

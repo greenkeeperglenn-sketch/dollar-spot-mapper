@@ -9,6 +9,7 @@ import {
   ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
+  Scatter,
   Tooltip,
   XAxis,
   YAxis,
@@ -46,6 +47,12 @@ type ChartRow = {
   rh_term_actual?: number;
   temp_term_forecast?: number;
   rh_term_forecast?: number;
+  // Photo markers (one row per photo-date; null elsewhere). Each chart has
+  // its own y so the marker sits at a sensible spot above the data.
+  photo_marker_pressure?: number;
+  photo_marker_logit?: number;
+  photo_marker_t5?: number;
+  photo_count?: number;
 };
 
 function buildRows(
@@ -94,9 +101,14 @@ function buildRows(
 export function PressurePanels({
   scores,
   forecast = [],
+  photosByDate,
+  onSelectPhotoDate,
 }: {
   scores: PressureScore[];
   forecast?: ForecastPressureRow[];
+  /** date (YYYY-MM-DD) -> count of photos saved on that date */
+  photosByDate?: Map<string, number>;
+  onSelectPhotoDate?: (date: string) => void;
 }) {
   const today = scores[scores.length - 1];
   const data = buildRows(scores, forecast);
@@ -106,6 +118,37 @@ export function PressurePanels({
   const forecastEndLabel =
     forecast.length > 0 ? fmt(forecast[forecast.length - 1].date) : null;
   const peak = pickPeak(forecast);
+
+  // Compute chart-specific marker y-values so the camera dot sits above
+  // the highest data point on each chart.
+  const maxLogit = data.reduce((m, d) => {
+    const a = (d.temp_term_actual ?? 0) + (d.rh_term_actual ?? 0);
+    const f = (d.temp_term_forecast ?? 0) + (d.rh_term_forecast ?? 0);
+    return Math.max(m, a, f);
+  }, 0);
+  const maxT5 = data.reduce(
+    (m, d) => Math.max(m, d.t5_actual ?? -Infinity, d.t5_forecast ?? -Infinity),
+    -Infinity
+  );
+  const markerPressureY = 0.95;
+  const markerLogitY = maxLogit > 0 ? maxLogit * 1.05 : 1;
+  const markerT5Y = Number.isFinite(maxT5) ? (maxT5 as number) + 2 : 30;
+
+  if (photosByDate && photosByDate.size > 0) {
+    for (const row of data) {
+      const count = photosByDate.get(row.date);
+      if (!count) continue;
+      row.photo_count = count;
+      row.photo_marker_pressure = markerPressureY;
+      row.photo_marker_logit = markerLogitY;
+      row.photo_marker_t5 = markerT5Y;
+    }
+  }
+
+  const handleScatterClick = (datum: { payload?: ChartRow }) => {
+    const date = datum.payload?.date;
+    if (date) onSelectPhotoDate?.(date);
+  };
 
   return (
     <div className="space-y-6">
@@ -175,6 +218,13 @@ export function PressurePanels({
               dot={false}
               connectNulls={false}
             />
+            <Scatter
+              dataKey="photo_marker_pressure"
+              name="Photo assessed"
+              shape={CameraDot}
+              onClick={handleScatterClick}
+              style={{ cursor: "pointer" }}
+            />
           </ComposedChart>
         </ResponsiveContainer>
       </Panel>
@@ -229,6 +279,13 @@ export function PressurePanels({
               stroke={RH_COLOUR}
               strokeDasharray="3 2"
               strokeWidth={1}
+            />
+            <Scatter
+              dataKey="photo_marker_logit"
+              name="Photo assessed"
+              shape={CameraDot}
+              onClick={handleScatterClick}
+              style={{ cursor: "pointer" }}
             />
           </ComposedChart>
         </ResponsiveContainer>
@@ -322,10 +379,54 @@ export function PressurePanels({
               dot={false}
               connectNulls={false}
             />
+            <Scatter
+              yAxisId="t"
+              dataKey="photo_marker_t5"
+              name="Photo assessed"
+              shape={CameraDot}
+              onClick={handleScatterClick}
+              style={{ cursor: "pointer" }}
+            />
           </ComposedChart>
         </ResponsiveContainer>
       </Panel>
     </div>
+  );
+}
+
+// Custom Scatter shape: a small numbered camera-dot above the chart at
+// the photo date. Outline + fill so it pops against any background.
+type DotProps = {
+  cx?: number;
+  cy?: number;
+  payload?: ChartRow;
+};
+function CameraDot(props: DotProps) {
+  const { cx, cy, payload } = props;
+  if (cx == null || cy == null) return null;
+  const count = payload?.photo_count ?? 0;
+  if (!count) return null;
+  return (
+    <g pointerEvents="all">
+      <circle
+        cx={cx}
+        cy={cy}
+        r={9}
+        fill="#0284c7"
+        stroke="#ffffff"
+        strokeWidth={2}
+      />
+      <text
+        x={cx}
+        y={cy + 4}
+        textAnchor="middle"
+        fontSize={11}
+        fontWeight={700}
+        fill="#ffffff"
+      >
+        {count > 9 ? "9+" : count}
+      </text>
+    </g>
   );
 }
 

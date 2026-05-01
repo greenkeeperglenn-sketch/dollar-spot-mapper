@@ -26,6 +26,9 @@ export type Location = {
   longitude: number;
   notes?: string;
   active: boolean;
+  /** Site names (e.g. "Chipping green", "11th tee") for this location's
+   *  Assess-photo dropdown. Stored newline-separated in the `sites` field. */
+  sites: string[];
 };
 
 export type WeatherReading = {
@@ -150,7 +153,17 @@ type LocationFields = {
   longitude: number;
   notes?: string;
   active?: boolean;
+  /** Newline-separated list of site names. Optional. */
+  sites?: string;
 };
+
+function parseSites(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
 function rowToLocation(r: AirtableRecord<LocationFields>): Location {
   return {
@@ -160,6 +173,7 @@ function rowToLocation(r: AirtableRecord<LocationFields>): Location {
     longitude: r.fields.longitude ?? 0,
     notes: r.fields.notes,
     active: r.fields.active ?? false,
+    sites: parseSites(r.fields.sites),
   };
 }
 
@@ -193,6 +207,7 @@ export async function createLocation(input: {
   longitude: number;
   notes?: string;
   active?: boolean;
+  sites?: string[];
 }): Promise<Location> {
   const r = await request<AirtableRecord<LocationFields>>(
     encodeURIComponent(TABLES.locations),
@@ -205,6 +220,7 @@ export async function createLocation(input: {
           longitude: input.longitude,
           notes: input.notes,
           active: input.active ?? true,
+          sites: input.sites?.join("\n"),
         },
       }),
     }
@@ -220,11 +236,19 @@ export async function updateLocation(
     longitude: number;
     notes: string;
     active: boolean;
+    sites: string[];
   }>
 ): Promise<Location> {
+  const fields: LocationFields = {} as LocationFields;
+  if (patch.name !== undefined) fields.name = patch.name;
+  if (patch.latitude !== undefined) fields.latitude = patch.latitude;
+  if (patch.longitude !== undefined) fields.longitude = patch.longitude;
+  if (patch.notes !== undefined) fields.notes = patch.notes;
+  if (patch.active !== undefined) fields.active = patch.active;
+  if (patch.sites !== undefined) fields.sites = patch.sites.join("\n");
   const r = await request<AirtableRecord<LocationFields>>(
     `${encodeURIComponent(TABLES.locations)}/${id}`,
-    { method: "PATCH", body: JSON.stringify({ fields: patch }) }
+    { method: "PATCH", body: JSON.stringify({ fields }) }
   );
   return rowToLocation(r);
 }

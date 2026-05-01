@@ -30,12 +30,14 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
 
   async function handleCreate(form: FormData) {
     setError(null);
+    const sitesRaw = String(form.get("sites") ?? "");
     const payload = {
       name: String(form.get("name") ?? "").trim(),
       latitude: Number(form.get("latitude")),
       longitude: Number(form.get("longitude")),
       notes: String(form.get("notes") ?? "").trim() || undefined,
       active: form.get("active") === "on",
+      sites: parseSitesText(sitesRaw),
     };
     const res = await fetch("/api/locations", {
       method: "POST",
@@ -140,6 +142,22 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
             placeholder="optional"
           />
         </div>
+        <div className="col-span-full">
+          <label className="block text-xs font-medium text-stone-600">
+            Sites at this location
+          </label>
+          <p className="text-xs text-stone-500">
+            One per line. These appear in the Assess-photo dropdown for this
+            location (e.g. <code>Chipping green</code>, <code>11th tee</code>,
+            <code>Practice green</code>). Leave blank to use ad-hoc names.
+          </p>
+          <textarea
+            name="sites"
+            rows={3}
+            placeholder={"Chipping green\n11th tee\nPractice green"}
+            className="mt-1 w-full rounded border border-stone-300 px-2 py-1 font-mono text-xs"
+          />
+        </div>
         <label className="col-span-full flex items-center gap-2 text-sm">
           <input type="checkbox" name="active" defaultChecked /> Active (included in
           daily cron)
@@ -164,6 +182,7 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
             <tr>
               <th className="px-3 py-2">Name</th>
               <th className="px-3 py-2">Lat / Lon</th>
+              <th className="px-3 py-2">Sites</th>
               <th className="px-3 py-2">Active</th>
               <th className="px-3 py-2">Notes</th>
               <th className="px-3 py-2 text-right">Actions</th>
@@ -172,7 +191,7 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
           <tbody>
             {locations.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-stone-500">
+                <td colSpan={6} className="px-3 py-6 text-center text-stone-500">
                   No locations yet. Add one above.
                 </td>
               </tr>
@@ -186,6 +205,16 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
                     <td className="px-3 py-2 font-medium">{loc.name}</td>
                     <td className="px-3 py-2 font-mono text-xs text-stone-600">
                       {loc.latitude.toFixed(4)}, {loc.longitude.toFixed(4)}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-stone-700">
+                      {loc.sites.length === 0 ? (
+                        <span className="text-stone-400">—</span>
+                      ) : (
+                        <span>
+                          {loc.sites.slice(0, 3).join(", ")}
+                          {loc.sites.length > 3 ? `, +${loc.sites.length - 3} more` : ""}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       {loc.active ? (
@@ -245,14 +274,16 @@ function EditRow({
     longitude: loc.longitude,
     notes: loc.notes ?? "",
     active: loc.active,
+    sitesText: loc.sites.join("\n"),
   });
   return (
-    <td colSpan={5} className="px-3 py-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <td colSpan={6} className="px-3 py-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-12">
         <input
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
-          className="w-40 rounded border border-stone-300 px-2 py-1 text-sm"
+          className="rounded border border-stone-300 px-2 py-1 text-sm sm:col-span-3"
+          placeholder="name"
         />
         <input
           type="number"
@@ -261,7 +292,8 @@ function EditRow({
           onChange={(e) =>
             setForm({ ...form, latitude: Number(e.target.value) })
           }
-          className="w-28 rounded border border-stone-300 px-2 py-1 text-sm"
+          className="rounded border border-stone-300 px-2 py-1 text-sm sm:col-span-2"
+          placeholder="latitude"
         />
         <input
           type="number"
@@ -270,15 +302,16 @@ function EditRow({
           onChange={(e) =>
             setForm({ ...form, longitude: Number(e.target.value) })
           }
-          className="w-28 rounded border border-stone-300 px-2 py-1 text-sm"
+          className="rounded border border-stone-300 px-2 py-1 text-sm sm:col-span-2"
+          placeholder="longitude"
         />
         <input
           value={form.notes}
           onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          className="flex-1 min-w-40 rounded border border-stone-300 px-2 py-1 text-sm"
+          className="rounded border border-stone-300 px-2 py-1 text-sm sm:col-span-4"
           placeholder="notes"
         />
-        <label className="flex items-center gap-1 text-sm">
+        <label className="flex items-center gap-1 text-sm sm:col-span-1">
           <input
             type="checkbox"
             checked={form.active}
@@ -286,19 +319,49 @@ function EditRow({
           />
           active
         </label>
-        <button
-          onClick={() => onSave(form)}
-          className="rounded bg-stone-900 px-3 py-1 text-sm text-white"
-        >
-          Save
-        </button>
-        <button
-          onClick={onCancel}
-          className="rounded border border-stone-300 px-3 py-1 text-sm"
-        >
-          Cancel
-        </button>
+        <div className="sm:col-span-12">
+          <label className="block text-xs font-medium text-stone-600">
+            Sites (one per line)
+          </label>
+          <textarea
+            rows={3}
+            value={form.sitesText}
+            onChange={(e) => setForm({ ...form, sitesText: e.target.value })}
+            className="mt-1 w-full rounded border border-stone-300 px-2 py-1 font-mono text-xs"
+            placeholder={"Chipping green\n11th tee\nPractice green"}
+          />
+        </div>
+        <div className="sm:col-span-12 flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="rounded border border-stone-300 px-3 py-1 text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() =>
+              onSave({
+                name: form.name,
+                latitude: form.latitude,
+                longitude: form.longitude,
+                notes: form.notes,
+                active: form.active,
+                sites: parseSitesText(form.sitesText),
+              })
+            }
+            className="rounded bg-stone-900 px-3 py-1 text-sm text-white"
+          >
+            Save
+          </button>
+        </div>
       </div>
     </td>
   );
+}
+
+function parseSitesText(raw: string): string[] {
+  return raw
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }

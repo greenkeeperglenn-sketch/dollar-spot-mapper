@@ -6,6 +6,7 @@ import type { Location, PhotoAssessment, PressureScore } from "@/lib/airtable";
 import type { ForecastPressureRow } from "@/lib/forecast-pressure";
 import { PhotoTrendPanels } from "@/components/PhotoTrendPanels";
 import { PressurePanels } from "@/components/PressurePanels";
+import { StoredAssessmentReview } from "@/components/StoredAssessmentReview";
 
 async function readError(res: Response): Promise<string> {
   const text = await res.text();
@@ -26,6 +27,32 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
   const [photos, setPhotos] = useState<PhotoAssessment[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [viewingDate, setViewingDate] = useState<string | null>(null);
+
+  // Reset selection when location changes.
+  useEffect(() => {
+    setViewingDate(null);
+  }, [selectedId]);
+
+  const photosByDate = useMemo(() => {
+    const m = new Map<string, PhotoAssessment[]>();
+    for (const p of photos ?? []) {
+      const list = m.get(p.photo_date) ?? [];
+      list.push(p);
+      m.set(p.photo_date, list);
+    }
+    return m;
+  }, [photos]);
+
+  const photoCountByDate = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const [d, list] of photosByDate) m.set(d, list.length);
+    return m;
+  }, [photosByDate]);
+
+  const viewingPhotos = viewingDate
+    ? photosByDate.get(viewingDate) ?? []
+    : [];
 
   useEffect(() => {
     if (!selectedId) {
@@ -129,9 +156,43 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
       )}
 
       {scores && scores.length > 0 && (
-        <PressurePanels scores={scores} forecast={forecast} />
+        <PressurePanels
+          scores={scores}
+          forecast={forecast}
+          photosByDate={photoCountByDate}
+          onSelectPhotoDate={(d) =>
+            setViewingDate((prev) => (prev === d ? null : d))
+          }
+        />
       )}
-      {photos && <PhotoTrendPanels photos={photos} />}
+
+      {viewingDate && viewingPhotos.length > 0 && (
+        <section className="space-y-3 rounded-lg border-2 border-blue-300 bg-blue-50/40 p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-stone-900">
+              Photo{viewingPhotos.length > 1 ? "s" : ""} from {viewingDate}
+            </h2>
+            <button
+              onClick={() => setViewingDate(null)}
+              className="rounded border border-stone-300 bg-white px-2 py-0.5 text-xs hover:bg-stone-50"
+            >
+              Close
+            </button>
+          </div>
+          {viewingPhotos.map((p) => (
+            <StoredAssessmentReview key={p.id} assessment={p} />
+          ))}
+        </section>
+      )}
+
+      {photos && (
+        <PhotoTrendPanels
+          photos={photos}
+          onSelectDate={(d) =>
+            setViewingDate((prev) => (prev === d ? null : d))
+          }
+        />
+      )}
     </div>
   );
 }

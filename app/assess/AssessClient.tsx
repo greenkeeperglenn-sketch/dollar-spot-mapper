@@ -96,6 +96,25 @@ export function AssessClient({ locations }: { locations: Location[] }) {
         </div>
       )}
 
+      {(step.kind === "pinning" ||
+        step.kind === "rectified" ||
+        step.kind === "analysed") && (
+        <ContextBar
+          meta={step.meta}
+          locations={locations}
+          onEdit={() => {
+            // Jump back to the loaded step so the user can change the location,
+            // site, or date. The loaded image is preserved.
+            setStep({
+              kind: "loaded",
+              img: step.img,
+              exifDate: step.meta.exifDate,
+              fileName: step.meta.originalFilename,
+            });
+          }}
+        />
+      )}
+
       {step.kind === "idle" && <FileDrop onFile={handleFile} />}
 
       {step.kind === "loaded" && (
@@ -300,6 +319,42 @@ export function AssessClient({ locations }: { locations: Location[] }) {
 
 // ---- Sub-steps -----------------------------------------------------------
 
+function ContextBar({
+  meta,
+  locations,
+  onEdit,
+}: {
+  meta: AssessMeta;
+  locations: Location[];
+  onEdit: () => void;
+}) {
+  const loc = locations.find((l) => l.id === meta.locationId);
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm">
+      <span className="text-xs uppercase tracking-wide text-stone-500">
+        Saving to
+      </span>
+      <span className="font-semibold text-stone-900">
+        {loc?.name ?? "(unknown location)"}
+      </span>
+      <span className="text-stone-400">·</span>
+      <span>
+        Site: <strong>{meta.quadratLabel}</strong>
+      </span>
+      <span className="text-stone-400">·</span>
+      <span>
+        Date: <strong>{meta.photoDate}</strong>
+      </span>
+      <button
+        onClick={onEdit}
+        className="ml-auto rounded border border-stone-400 px-2 py-0.5 text-xs hover:bg-white"
+      >
+        Change
+      </button>
+    </div>
+  );
+}
+
 function FileDrop({ onFile }: { onFile: (f: File) => void }) {
   const [drag, setDrag] = useState(false);
   return (
@@ -358,9 +413,31 @@ function DateAndLocation({
 }) {
   const [locationId, setLocationId] = useState(locations[0]?.id ?? "");
   const [photoDate, setPhotoDate] = useState(exifDate ?? "");
-  const [quadrat, setQuadrat] = useState("Q1");
+  const selectedLocation = locations.find((l) => l.id === locationId);
+  const sites = selectedLocation?.sites ?? [];
+  // siteSelect is the dropdown value: a site name from the list, or
+  // "__custom__" to enter a free-form label.
+  const [siteSelect, setSiteSelect] = useState<string>("");
+  const [customSite, setCustomSite] = useState("");
 
-  const isValid = locationId && /^\d{4}-\d{2}-\d{2}$/.test(photoDate) && quadrat;
+  // When the location changes, reset the chosen site to the first available
+  // option for the new location, or to custom if the location has none.
+  useEffect(() => {
+    if (sites.length > 0) {
+      setSiteSelect(sites[0]);
+    } else {
+      setSiteSelect("__custom__");
+      if (!customSite) setCustomSite("Q1");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationId]);
+
+  const effectiveSite =
+    siteSelect === "__custom__" ? customSite.trim() : siteSelect;
+  const isValid =
+    !!locationId &&
+    /^\d{4}-\d{2}-\d{2}$/.test(photoDate) &&
+    effectiveSite.length > 0;
   const today = new Date().toISOString().slice(0, 10);
   const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
   const lastMonday = (() => {
@@ -424,18 +501,43 @@ function DateAndLocation({
 
         <div>
           <label className="block text-xs font-medium text-stone-600">
-            Quadrat label
+            Site
           </label>
-          <p className="text-xs text-stone-500">
-            Use Q1 / Q2 / etc if multiple photos for the same location on the
-            same day. Each gets its own row; the location's pressure is
-            shared.
-          </p>
-          <input
-            value={quadrat}
-            onChange={(e) => setQuadrat(e.target.value)}
+          {sites.length > 0 ? (
+            <p className="text-xs text-stone-500">
+              Pick one of the saved sites for this location, or choose
+              &quot;Other&hellip;&quot; to type an ad-hoc name.
+            </p>
+          ) : (
+            <p className="text-xs text-amber-700">
+              No saved sites for this location yet. You can{" "}
+              <a href="/locations" className="underline">
+                add some on the Locations page
+              </a>{" "}
+              (e.g. <em>Chipping green</em>, <em>11th tee</em>) so they show up
+              here next time.
+            </p>
+          )}
+          <select
+            value={siteSelect}
+            onChange={(e) => setSiteSelect(e.target.value)}
             className="mt-1 w-full rounded border border-stone-300 px-2 py-1 text-sm"
-          />
+          >
+            {sites.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+            <option value="__custom__">Other / new&hellip;</option>
+          </select>
+          {siteSelect === "__custom__" && (
+            <input
+              value={customSite}
+              onChange={(e) => setCustomSite(e.target.value)}
+              placeholder="e.g. 7th green, North quadrat"
+              className="mt-2 w-full rounded border border-stone-300 px-2 py-1 text-sm"
+            />
+          )}
         </div>
 
         <div className="flex gap-2">
@@ -445,7 +547,7 @@ function DateAndLocation({
               onNext({
                 locationId,
                 photoDate,
-                quadratLabel: quadrat,
+                quadratLabel: effectiveSite,
                 exifDate,
                 originalFilename: fileName,
               })
