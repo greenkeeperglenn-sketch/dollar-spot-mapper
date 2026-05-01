@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Bar,
   CartesianGrid,
@@ -14,8 +15,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { PressureScore } from "@/lib/airtable";
+import type { PhotoAssessment, PressureScore } from "@/lib/airtable";
 import type { ForecastPressureRow } from "@/lib/forecast-pressure";
+import { buildShareCard, copyOrDownloadBlob } from "@/lib/share-card";
 
 const TEMP_COLOUR = "#d97706"; // amber-600
 const RH_COLOUR = "#0284c7"; // sky-600
@@ -103,12 +105,16 @@ export function PressurePanels({
   forecast = [],
   photosByDate,
   onSelectPhotoDate,
+  locationName,
+  photos,
 }: {
   scores: PressureScore[];
   forecast?: ForecastPressureRow[];
   /** date (YYYY-MM-DD) -> count of photos saved on that date */
   photosByDate?: Map<string, number>;
   onSelectPhotoDate?: (date: string) => void;
+  locationName?: string;
+  photos?: PhotoAssessment[];
 }) {
   const today = scores[scores.length - 1];
   const data = buildRows(scores, forecast);
@@ -150,6 +156,51 @@ export function PressurePanels({
     if (date) onSelectPhotoDate?.(date);
   };
 
+  const [shareStatus, setShareStatus] = useState<
+    | { kind: "idle" }
+    | { kind: "busy" }
+    | { kind: "ok"; how: "clipboard" | "download" }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+
+  async function handleCopyShare() {
+    if (shareStatus.kind === "busy") return;
+    setShareStatus({ kind: "busy" });
+    try {
+      const photoDates = (photos ?? []).map((p) => p.photo_date);
+      // Mean disease % across the photos that fall within the on-screen
+      // window (last 30 days of scores).
+      const sinceDate = scores[0]?.date ?? "0000-01-01";
+      const inWindow = (photos ?? []).filter((p) => p.photo_date >= sinceDate);
+      const meanDiseasePct =
+        inWindow.length === 0
+          ? null
+          : inWindow.reduce((s, p) => s + p.disease_pct, 0) / inWindow.length;
+      const blob = await buildShareCard({
+        locationName: locationName ?? "Location",
+        scores,
+        forecast,
+        photoCount: inWindow.length,
+        meanDiseasePct,
+        photoDates,
+      });
+      const how = await copyOrDownloadBlob(
+        blob,
+        `${(locationName ?? "location").replace(/\s+/g, "-").toLowerCase()}-pressure-${new Date()
+          .toISOString()
+          .slice(0, 10)}.png`
+      );
+      setShareStatus({ kind: "ok", how });
+      setTimeout(() => setShareStatus({ kind: "idle" }), 4000);
+    } catch (e) {
+      setShareStatus({
+        kind: "error",
+        message: e instanceof Error ? e.message : String(e),
+      });
+      setTimeout(() => setShareStatus({ kind: "idle" }), 6000);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <TodayCard score={today} peak={peak} />
@@ -157,6 +208,32 @@ export function PressurePanels({
       <Panel
         title="Smith-Kerns probability"
         subtitle={`30-day history. Forecast (dashed) — next ${forecast.length} days from Open-Meteo. Risk bands: green Low (<20%), amber Moderate (20–30%), red High (≥30%).`}
+        actions={
+          <div className="flex flex-col items-end gap-1">
+            <button
+              onClick={handleCopyShare}
+              disabled={shareStatus.kind === "busy"}
+              className="rounded border border-stone-300 bg-white px-3 py-1 text-xs font-medium hover:bg-stone-50 disabled:opacity-50"
+              title="Build a shareable summary image and copy it to your clipboard"
+            >
+              {shareStatus.kind === "busy"
+                ? "Building…"
+                : "📋 Copy share image"}
+            </button>
+            {shareStatus.kind === "ok" && (
+              <span className="text-[11px] text-green-700">
+                {shareStatus.how === "clipboard"
+                  ? "Copied — paste into WhatsApp."
+                  : "Downloaded (clipboard not allowed)."}
+              </span>
+            )}
+            {shareStatus.kind === "error" && (
+              <span className="text-[11px] text-red-700">
+                {shareStatus.message}
+              </span>
+            )}
+          </div>
+        }
       >
         <ResponsiveContainer width="100%" height={240}>
           <ComposedChart data={data}>
@@ -473,18 +550,23 @@ function Panel({
   title,
   subtitle,
   children,
+  actions,
 }: {
   title: string;
   subtitle: string;
   children: React.ReactNode;
+  actions?: React.ReactNode;
 }) {
   return (
     <section className="rounded-lg border border-stone-200 bg-white p-4">
-      <header className="mb-3">
-        <h2 className="text-sm font-semibold tracking-tight text-stone-900">
-          {title}
-        </h2>
-        <p className="text-xs text-stone-500">{subtitle}</p>
+      <header className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold tracking-tight text-stone-900">
+            {title}
+          </h2>
+          <p className="text-xs text-stone-500">{subtitle}</p>
+        </div>
+        {actions && <div className="shrink-0">{actions}</div>}
       </header>
       {children}
     </section>

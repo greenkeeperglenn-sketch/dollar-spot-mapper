@@ -163,6 +163,10 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
           onSelectPhotoDate={(d) =>
             setViewingDate((prev) => (prev === d ? null : d))
           }
+          locationName={
+            active.find((l) => l.id === selectedId)?.name ?? "Location"
+          }
+          photos={photos ?? []}
         />
       )}
 
