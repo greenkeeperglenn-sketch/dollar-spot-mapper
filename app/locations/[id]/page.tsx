@@ -6,6 +6,7 @@ import {
   listPressureForLocation,
 } from "@/lib/airtable";
 import { addDays, todayUTC } from "@/lib/dates";
+import { computeForecastPressure } from "@/lib/forecast-pressure";
 import { LocationHistory } from "./LocationHistory";
 
 export const dynamic = "force-dynamic";
@@ -20,9 +21,10 @@ export default async function LocationDetailPage({
   if (!loc) notFound();
 
   const since = addDays(todayUTC(), -120);
-  const [pressure, photos] = await Promise.all([
+  const [pressure, photos, forecast] = await Promise.all([
     listPressureForLocation(id, { sinceDate: since }).catch(() => []),
     listPhotosForLocation(id).catch(() => []),
+    computeForecastPressure(loc, 14).catch(() => []),
   ]);
 
   return (
@@ -51,7 +53,11 @@ export default async function LocationDetailPage({
         </div>
       </div>
 
-      <LocationHistory pressure={pressure} photos={photos} />
+      <LocationHistory
+        pressure={pressure}
+        photos={photos}
+        forecast={forecast}
+      />
     </div>
   );
 }

@@ -37,10 +37,40 @@ export async function fetchDailyRange(input: {
     throw new Error(`Open-Meteo ${res.status}: ${await res.text()}`);
   }
   const json = (await res.json()) as ArchiveResponse;
+  return parseDaily(json);
+}
+
+// Open-Meteo's forecast API returns up to 16 future days. Free, no key.
+// https://open-meteo.com/en/docs
+export async function fetchForecast(input: {
+  latitude: number;
+  longitude: number;
+  forecastDays: number; // 1..16
+}): Promise<DailyWeather[]> {
+  const days = Math.max(1, Math.min(16, Math.round(input.forecastDays)));
+  const url = new URL("https://api.open-meteo.com/v1/forecast");
+  url.searchParams.set("latitude", String(input.latitude));
+  url.searchParams.set("longitude", String(input.longitude));
+  url.searchParams.set("forecast_days", String(days));
+  url.searchParams.set("past_days", "0");
+  url.searchParams.set(
+    "daily",
+    "temperature_2m_mean,relative_humidity_2m_mean"
+  );
+  url.searchParams.set("timezone", "auto");
+
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Open-Meteo forecast ${res.status}: ${await res.text()}`);
+  }
+  const json = (await res.json()) as ArchiveResponse;
+  return parseDaily(json);
+}
+
+function parseDaily(json: ArchiveResponse): DailyWeather[] {
   const times = json.daily?.time ?? [];
   const temps = json.daily?.temperature_2m_mean ?? [];
   const rhs = json.daily?.relative_humidity_2m_mean ?? [];
-
   const out: DailyWeather[] = [];
   for (let i = 0; i < times.length; i++) {
     const t = temps[i];

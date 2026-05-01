@@ -4,13 +4,16 @@ import { useState } from "react";
 import {
   CartesianGrid,
   ComposedChart,
+  Legend,
   Line,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import type { PhotoAssessment, PressureScore } from "@/lib/airtable";
+import type { ForecastPressureRow } from "@/lib/forecast-pressure";
 import { PhotoTrendPanels } from "@/components/PhotoTrendPanels";
 import { StoredAssessmentReview } from "@/components/StoredAssessmentReview";
 import { groupPhotosByDate } from "@/lib/photo-aggregations";
@@ -18,22 +21,30 @@ import { groupPhotosByDate } from "@/lib/photo-aggregations";
 export function LocationHistory({
   pressure,
   photos,
+  forecast = [],
 }: {
   pressure: PressureScore[];
   photos: PhotoAssessment[];
+  forecast?: ForecastPressureRow[];
 }) {
   const groups = groupPhotosByDate(photos);
   return (
     <div className="space-y-6">
-      <PressureSection pressure={pressure} />
+      <PressureSection pressure={pressure} forecast={forecast} />
       <PhotoTrendPanels photos={photos} />
       <PhotosTable groups={groups} />
     </div>
   );
 }
 
-function PressureSection({ pressure }: { pressure: PressureScore[] }) {
-  if (pressure.length === 0) {
+function PressureSection({
+  pressure,
+  forecast,
+}: {
+  pressure: PressureScore[];
+  forecast: ForecastPressureRow[];
+}) {
+  if (pressure.length === 0 && forecast.length === 0) {
     return (
       <Card title="Disease pressure">
         <p className="text-sm text-stone-500">
@@ -42,29 +53,80 @@ function PressureSection({ pressure }: { pressure: PressureScore[] }) {
       </Card>
     );
   }
-  const data = pressure.map((p) => ({ ...p, label: shortDate(p.date) }));
+  type Row = {
+    label: string;
+    actual?: number;
+    forecast?: number;
+  };
+  const rows: Row[] = [];
+  for (let i = 0; i < pressure.length; i++) {
+    const p = pressure[i];
+    const isLast = i === pressure.length - 1;
+    rows.push({
+      label: shortDate(p.date),
+      actual: p.smith_kerns_probability,
+      ...(isLast && forecast.length > 0
+        ? { forecast: p.smith_kerns_probability }
+        : {}),
+    });
+  }
+  for (const f of forecast) {
+    rows.push({ label: shortDate(f.date), forecast: f.smith_kerns_probability });
+  }
+  const todayLabel =
+    pressure.length > 0 ? shortDate(pressure[pressure.length - 1].date) : null;
+
   return (
     <Card
       title="Disease pressure (Smith-Kerns)"
-      subtitle="Last 120 days. Risk band is computed from the probability."
+      subtitle={`Last 120 days of actuals; next ${forecast.length} days forecast (dashed) from Open-Meteo.`}
     >
-      <ResponsiveContainer width="100%" height={220}>
-        <ComposedChart data={data}>
+      <ResponsiveContainer width="100%" height={240}>
+        <ComposedChart data={rows}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
-          <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: 11 }}
+            interval="preserveStartEnd"
+          />
           <YAxis
             domain={[0, 1]}
             tickFormatter={(v) => v.toFixed(2)}
             tick={{ fontSize: 12 }}
           />
           <Tooltip formatter={(v) => Number(v).toFixed(3)} />
+          <Legend />
+          {todayLabel && (
+            <ReferenceLine
+              x={todayLabel}
+              stroke="#1c1917"
+              strokeDasharray="4 4"
+              label={{
+                value: "Today",
+                position: "insideTop",
+                fontSize: 11,
+                fill: "#1c1917",
+              }}
+            />
+          )}
           <Line
             type="monotone"
-            dataKey="smith_kerns_probability"
-            name="P(infection)"
+            dataKey="actual"
+            name="Actual"
             stroke="#374151"
             strokeWidth={2}
             dot={false}
+            connectNulls={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="forecast"
+            name="Forecast"
+            stroke="#9ca3af"
+            strokeWidth={2}
+            strokeDasharray="6 4"
+            dot={false}
+            connectNulls={false}
           />
         </ComposedChart>
       </ResponsiveContainer>

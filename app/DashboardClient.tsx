@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { Location, PhotoAssessment, PressureScore } from "@/lib/airtable";
+import type { ForecastPressureRow } from "@/lib/forecast-pressure";
 import { PhotoTrendPanels } from "@/components/PhotoTrendPanels";
 import { PressurePanels } from "@/components/PressurePanels";
 
@@ -21,6 +22,7 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
   const active = useMemo(() => locations.filter((l) => l.active), [locations]);
   const [selectedId, setSelectedId] = useState<string>(active[0]?.id ?? "");
   const [scores, setScores] = useState<PressureScore[] | null>(null);
+  const [forecast, setForecast] = useState<ForecastPressureRow[]>([]);
   const [photos, setPhotos] = useState<PhotoAssessment[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +30,7 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
   useEffect(() => {
     if (!selectedId) {
       setScores(null);
+      setForecast([]);
       setPhotos(null);
       return;
     }
@@ -36,11 +39,15 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
     setError(null);
 
     Promise.all([
-      fetch(`/api/pressure?locationId=${selectedId}&days=30`, {
-        cache: "no-store",
-      }).then(async (r) => {
+      fetch(
+        `/api/pressure?locationId=${selectedId}&days=30&forecastDays=14`,
+        { cache: "no-store" }
+      ).then(async (r) => {
         if (!r.ok) throw new Error(await readError(r));
-        return (await r.json()) as { scores: PressureScore[] };
+        return (await r.json()) as {
+          scores: PressureScore[];
+          forecast: ForecastPressureRow[];
+        };
       }),
       fetch(`/api/photos?locationId=${selectedId}`, {
         cache: "no-store",
@@ -52,6 +59,7 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
       .then(([p, ph]) => {
         if (cancelled) return;
         setScores(p.scores);
+        setForecast(p.forecast ?? []);
         setPhotos(ph.photos);
       })
       .catch((e) => {
@@ -120,7 +128,9 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
         </div>
       )}
 
-      {scores && scores.length > 0 && <PressurePanels scores={scores} />}
+      {scores && scores.length > 0 && (
+        <PressurePanels scores={scores} forecast={forecast} />
+      )}
       {photos && <PhotoTrendPanels photos={photos} />}
     </div>
   );
