@@ -156,7 +156,7 @@ export function PressurePanels({
 
       <Panel
         title="Smith-Kerns probability"
-        subtitle={`30-day history. Forecast (dashed) — next ${forecast.length} days from Open-Meteo. Risk bands: green Low (<0.20), amber Moderate (0.20–0.30), red High (≥0.30).`}
+        subtitle={`30-day history. Forecast (dashed) — next ${forecast.length} days from Open-Meteo. Risk bands: green Low (<20%), amber Moderate (20–30%), red High (≥30%).`}
       >
         <ResponsiveContainer width="100%" height={240}>
           <ComposedChart data={data}>
@@ -164,12 +164,12 @@ export function PressurePanels({
             <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
             <YAxis
               domain={[0, 1]}
-              tickFormatter={(v) => v.toFixed(2)}
+              tickFormatter={(v) => `${Math.round(v * 100)}%`}
               tick={{ fontSize: 12 }}
             />
             <Tooltip
               formatter={(v, k) => [
-                Number(v).toFixed(3),
+                `${(Number(v) * 100).toFixed(1)}%`,
                 String(k).includes("forecast") ? "P (forecast)" : "P (actual)",
               ]}
               labelFormatter={(l) => `Date: ${l}`}
@@ -231,8 +231,32 @@ export function PressurePanels({
 
       <Panel
         title="What's driving pressure"
-        subtitle="Stacked contribution to the logit, above the −11.40 intercept. Forecast bars are lighter / dashed-edge."
+        subtitle="Daily contribution from temperature and humidity, side by side. Forecast bars are lighter with a dashed edge."
       >
+        <div className="mb-3 rounded border border-stone-200 bg-stone-50 p-3 text-xs text-stone-700 leading-relaxed">
+          <p className="font-medium text-stone-900">In plain English</p>
+          <p className="mt-1">
+            Disease pressure is the sum of two ingredients: <strong style={{ color: TEMP_COLOUR }}>warm temperatures</strong>{" "}
+            and <strong style={{ color: RH_COLOUR }}>humid air</strong>. Each
+            day's bar splits that contribution: the orange part is how much
+            the 5-day average temperature is pushing pressure up, the blue
+            part is how much the 5-day average humidity is pushing it up.
+          </p>
+          <p className="mt-2">
+            <strong>Taller orange than blue?</strong> Heat is the main
+            driver — pressure will fall fast on a cool spell.{" "}
+            <strong>Taller blue than orange?</strong> It&rsquo;s a humid
+            stretch — keep an eye out for dew, irrigation, or wet weather.{" "}
+            <strong>Both growing together?</strong> Classic dollar-spot
+            conditions; expect the probability above to climb.
+          </p>
+          <p className="mt-2 text-stone-500">
+            (For the curious: each bar is the input to a logistic curve —
+            the model maths is{" "}
+            <code>−11.40 + 0.193·T + 0.089·RH</code>. The probability chart
+            above is just that number squashed into the 0–100% range.)
+          </p>
+        </div>
         <ResponsiveContainer width="100%" height={240}>
           <ComposedChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />

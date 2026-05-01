@@ -100,10 +100,10 @@ function PressureSection({
           />
           <YAxis
             domain={[0, 1]}
-            tickFormatter={(v) => v.toFixed(2)}
+            tickFormatter={(v) => `${Math.round(v * 100)}%`}
             tick={{ fontSize: 12 }}
           />
-          <Tooltip formatter={(v) => Number(v).toFixed(3)} />
+          <Tooltip formatter={(v) => `${(Number(v) * 100).toFixed(1)}%`} />
           <Legend />
           {todayLabel && (
             <ReferenceLine
