@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   getLocation,
+  listLocations,
   listPhotosForLocation,
   listPressureForLocation,
 } from "@/lib/airtable";
@@ -21,10 +22,11 @@ export default async function LocationDetailPage({
   if (!loc) notFound();
 
   const since = addDays(todayUTC(), -120);
-  const [pressure, photos, forecast] = await Promise.all([
+  const [pressure, photos, forecast, allLocations] = await Promise.all([
     listPressureForLocation(id, { sinceDate: since }).catch(() => []),
     listPhotosForLocation(id).catch(() => []),
     computeForecastPressure(loc, 14).catch(() => []),
+    listLocations().catch(() => []),
   ]);
 
   return (
@@ -57,6 +59,8 @@ export default async function LocationDetailPage({
         pressure={pressure}
         photos={photos}
         forecast={forecast}
+        currentLocationId={loc.id}
+        allLocations={allLocations}
       />
     </div>
   );

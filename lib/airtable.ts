@@ -485,3 +485,43 @@ export async function createPhotoAssessment(input: {
   );
   return rowToPhoto(r);
 }
+
+export async function getPhotoAssessment(
+  id: string
+): Promise<PhotoAssessment | null> {
+  try {
+    const r = await request<AirtableRecord<PhotoFields>>(
+      `${encodeURIComponent(TABLES.photos)}/${id}`
+    );
+    return rowToPhoto(r);
+  } catch (e) {
+    if (e instanceof Error && /\b404\b/.test(e.message)) return null;
+    throw e;
+  }
+}
+
+export async function updatePhotoAssessment(
+  id: string,
+  patch: Partial<{
+    locationId: string;
+    quadrat_label: string;
+    notes: string;
+  }>
+): Promise<PhotoAssessment> {
+  const fields: PhotoFields = {};
+  if (patch.locationId !== undefined) fields.location = [patch.locationId];
+  if (patch.quadrat_label !== undefined)
+    fields.quadrat_label = patch.quadrat_label;
+  if (patch.notes !== undefined) fields.notes = patch.notes;
+  const r = await request<AirtableRecord<PhotoFields>>(
+    `${encodeURIComponent(TABLES.photos)}/${id}`,
+    { method: "PATCH", body: JSON.stringify({ fields }) }
+  );
+  return rowToPhoto(r);
+}
+
+export async function deletePhotoAssessment(id: string): Promise<void> {
+  await request(`${encodeURIComponent(TABLES.photos)}/${id}`, {
+    method: "DELETE",
+  });
+}
