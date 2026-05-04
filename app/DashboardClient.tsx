@@ -28,6 +28,9 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewingDate, setViewingDate] = useState<string | null>(null);
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
+  const [caughtUpDays, setCaughtUpDays] = useState(0);
+  const [catchUpError, setCatchUpError] = useState<string | null>(null);
 
   // Reset selection when location changes.
   useEffect(() => {
@@ -74,6 +77,9 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
         return (await r.json()) as {
           scores: PressureScore[];
           forecast: ForecastPressureRow[];
+          synced_at_iso?: string;
+          caught_up_days?: number;
+          catch_up_error?: string | null;
         };
       }),
       fetch(`/api/photos?locationId=${selectedId}`, {
@@ -88,6 +94,9 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
         setScores(p.scores);
         setForecast(p.forecast ?? []);
         setPhotos(ph.photos);
+        setSyncedAt(p.synced_at_iso ?? null);
+        setCaughtUpDays(p.caught_up_days ?? 0);
+        setCatchUpError(p.catch_up_error ?? null);
       })
       .catch((e) => {
         if (!cancelled) setError(String(e));
@@ -167,6 +176,9 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
             active.find((l) => l.id === selectedId)?.name ?? "Location"
           }
           photos={photos ?? []}
+          syncedAtIso={syncedAt}
+          caughtUpDays={caughtUpDays}
+          catchUpError={catchUpError}
         />
       )}
 

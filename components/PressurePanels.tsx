@@ -107,6 +107,9 @@ export function PressurePanels({
   onSelectPhotoDate,
   locationName,
   photos,
+  syncedAtIso,
+  caughtUpDays = 0,
+  catchUpError = null,
 }: {
   scores: PressureScore[];
   forecast?: ForecastPressureRow[];
@@ -115,6 +118,11 @@ export function PressurePanels({
   onSelectPhotoDate?: (date: string) => void;
   locationName?: string;
   photos?: PhotoAssessment[];
+  /** Server timestamp the data was fetched at. */
+  syncedAtIso?: string | null;
+  /** How many days of pressure rows the server filled in just before responding. */
+  caughtUpDays?: number;
+  catchUpError?: string | null;
 }) {
   const today = scores[scores.length - 1];
   const data = buildRows(scores, forecast);
@@ -203,7 +211,13 @@ export function PressurePanels({
 
   return (
     <div className="space-y-6">
-      <TodayCard score={today} peak={peak} />
+      <TodayCard
+        score={today}
+        peak={peak}
+        syncedAtIso={syncedAtIso ?? null}
+        caughtUpDays={caughtUpDays}
+        catchUpError={catchUpError}
+      />
 
       <Panel
         title="Smith-Kerns probability"
@@ -576,9 +590,15 @@ function Panel({
 function TodayCard({
   score,
   peak,
+  syncedAtIso,
+  caughtUpDays,
+  catchUpError,
 }: {
   score: PressureScore | undefined;
   peak: { date: string; probability: number; risk_band: string } | null;
+  syncedAtIso: string | null;
+  caughtUpDays: number;
+  catchUpError: string | null;
 }) {
   if (!score) return null;
   const colour =
@@ -587,6 +607,22 @@ function TodayCard({
       : score.risk_band === "Moderate"
       ? "bg-amber-50 border-amber-200 text-amber-900"
       : "bg-green-50 border-green-200 text-green-900";
+
+  const yesterdayIso = (() => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  const stale = score.date < yesterdayIso;
+  const lagDays = Math.max(
+    0,
+    Math.round(
+      (new Date(`${yesterdayIso}T00:00:00Z`).getTime() -
+        new Date(`${score.date}T00:00:00Z`).getTime()) /
+        86_400_000
+    )
+  );
+
   return (
     <section className={`rounded-lg border p-4 ${colour}`}>
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -621,6 +657,44 @@ function TodayCard({
           <br />→ p = {score.smith_kerns_probability.toFixed(3)}
         </div>
       </div>
+
+      <div className="mt-3 border-t border-current/15 pt-2 text-[11px] opacity-80">
+        {syncedAtIso && (
+          <span>Synced {formatRelativeTime(syncedAtIso)}.</span>
+        )}{" "}
+        {caughtUpDays > 0 && (
+          <span>
+            Pulled {caughtUpDays} new day{caughtUpDays === 1 ? "" : "s"} of
+            weather just now.
+          </span>
+        )}
+        {stale && lagDays > 0 && (
+          <span className="ml-1">
+            Latest stored row is {lagDays} day{lagDays === 1 ? "" : "s"} old —{" "}
+            {catchUpError
+              ? `couldn't fetch newer data (${catchUpError}).`
+              : "Open-Meteo doesn't have anything fresher yet."}
+          </span>
+        )}
+      </div>
     </section>
   );
+}
+
+function formatRelativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const seconds = Math.round((now - then) / 1000);
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return new Date(iso).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
