@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Location, PhotoAssessment, PressureScore } from "@/lib/airtable";
 import type { ForecastPressureRow } from "@/lib/forecast-pressure";
 import { HeroSummary, type Range } from "@/components/HeroSummary";
@@ -299,71 +299,136 @@ function LocationStrip({
   photoCounts: Record<string, number>;
   onSelect: (id: string) => void;
 }) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    function update() {
+      const e = scrollerRef.current;
+      if (!e) return;
+      setCanScrollLeft(e.scrollLeft > 4);
+      setCanScrollRight(e.scrollLeft + e.clientWidth < e.scrollWidth - 4);
+    }
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, [locations.length]);
+
+  function scrollByDir(dir: -1 | 1) {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: "smooth" });
+  }
+
   if (locations.length === 0) return null;
   return (
-    <nav
-      aria-label="Locations"
-      className="overflow-x-auto pb-2"
-    >
-      <div className="flex gap-3 px-1 pt-2">
-        {locations.map((loc) => {
-          const count = photoCounts[loc.id] ?? 0;
-          const isSelected = loc.id === selectedId;
-          return (
-            <button
-              key={loc.id}
-              type="button"
-              onClick={() => onSelect(loc.id)}
-              className={`group relative flex shrink-0 flex-col items-center gap-2 rounded-2xl border-2 bg-white p-3 transition-all duration-200 ease-out ${
-                isSelected
-                  ? "border-stone-900 shadow-lg ring-4 ring-stone-200"
-                  : "border-stone-200 hover:scale-105 hover:border-stone-400 hover:shadow-md hover:ring-4 hover:ring-blue-100"
-              }`}
-              style={{ minWidth: 116 }}
-              title={`${loc.name} — ${count} photo${count === 1 ? "" : "s"}`}
-            >
-              <div className="flex h-16 w-24 items-center justify-center">
-                {loc.logo_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={loc.logo_url}
-                    alt={loc.name}
-                    className={`h-full w-full object-contain transition-transform duration-200 ease-out ${
-                      isSelected ? "" : "group-hover:scale-110"
-                    }`}
-                    loading="lazy"
-                  />
-                ) : (
-                  <div
-                    className={`flex h-14 w-14 items-center justify-center rounded-full bg-stone-100 text-xl font-bold text-stone-600 transition-transform duration-200 ease-out ${
-                      isSelected ? "" : "group-hover:scale-110"
-                    }`}
-                  >
-                    {loc.name.charAt(0).toUpperCase()}
-                  </div>
-                )}
-              </div>
-              <div
-                className={`text-center text-xs font-semibold leading-tight ${
-                  isSelected ? "text-stone-900" : "text-stone-700"
-                }`}
-                style={{ maxWidth: 110 }}
-              >
-                {loc.name}
-              </div>
-              <span
-                className={`rounded-full px-2 py-0.5 text-[10px] font-medium tabular-nums ${
+    <nav aria-label="Locations" className="relative">
+      <div
+        ref={scrollerRef}
+        className="overflow-x-auto pb-2"
+      >
+        <div className="mx-auto flex w-max gap-3 px-10 pt-2">
+          {locations.map((loc) => {
+            const count = photoCounts[loc.id] ?? 0;
+            const isSelected = loc.id === selectedId;
+            return (
+              <button
+                key={loc.id}
+                type="button"
+                onClick={() => onSelect(loc.id)}
+                className={`group relative flex shrink-0 flex-col items-center gap-2 rounded-2xl border-2 bg-white p-3 transition-all duration-200 ease-out ${
                   isSelected
-                    ? "bg-stone-900 text-white"
-                    : "bg-stone-100 text-stone-600 group-hover:bg-blue-50 group-hover:text-blue-800"
+                    ? "border-stone-900 shadow-lg ring-4 ring-stone-200"
+                    : "border-stone-200 hover:scale-105 hover:border-stone-400 hover:shadow-md hover:ring-4 hover:ring-blue-100"
                 }`}
+                style={{ minWidth: 116 }}
+                title={`${loc.name} — ${count} photo${count === 1 ? "" : "s"}`}
               >
-                {count} photo{count === 1 ? "" : "s"}
-              </span>
-            </button>
-          );
-        })}
+                <div className="flex h-16 w-24 items-center justify-center">
+                  {loc.logo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={loc.logo_url}
+                      alt={loc.name}
+                      className={`h-full w-full object-contain transition-transform duration-200 ease-out ${
+                        isSelected ? "" : "group-hover:scale-110"
+                      }`}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div
+                      className={`flex h-14 w-14 items-center justify-center rounded-full bg-stone-100 text-xl font-bold text-stone-600 transition-transform duration-200 ease-out ${
+                        isSelected ? "" : "group-hover:scale-110"
+                      }`}
+                    >
+                      {loc.name.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+                <div
+                  className={`text-center text-xs font-semibold leading-tight ${
+                    isSelected ? "text-stone-900" : "text-stone-700"
+                  }`}
+                  style={{ maxWidth: 110 }}
+                >
+                  {loc.name}
+                </div>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium tabular-nums ${
+                    isSelected
+                      ? "bg-stone-900 text-white"
+                      : "bg-stone-100 text-stone-600 group-hover:bg-blue-50 group-hover:text-blue-800"
+                  }`}
+                >
+                  {count} photo{count === 1 ? "" : "s"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
+      {canScrollLeft && (
+        <ScrollButton
+          direction="left"
+          onClick={() => scrollByDir(-1)}
+        />
+      )}
+      {canScrollRight && (
+        <ScrollButton
+          direction="right"
+          onClick={() => scrollByDir(1)}
+        />
+      )}
     </nav>
+  );
+}
+
+function ScrollButton({
+  direction,
+  onClick,
+}: {
+  direction: "left" | "right";
+  onClick: () => void;
+}) {
+  const isLeft = direction === "left";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={isLeft ? "Scroll locations left" : "Scroll locations right"}
+      className={`absolute top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-full border border-stone-300 bg-white/95 text-lg text-stone-700 shadow-md backdrop-blur transition-all hover:scale-110 hover:bg-white hover:text-stone-900 hover:shadow-lg ${
+        isLeft ? "left-1" : "right-1"
+      }`}
+    >
+      {isLeft ? "‹" : "›"}
+    </button>
   );
 }
