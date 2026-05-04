@@ -1,8 +1,10 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Location } from "@/lib/airtable";
+import { ImageDropZone } from "@/components/ImageDropZone";
 
 async function readError(res: Response, fallback: string): Promise<string> {
   const text = await res.text();
@@ -13,6 +15,19 @@ async function readError(res: Response, fallback: string): Promise<string> {
     // not JSON
   }
   return text.slice(0, 500) || `${fallback} (HTTP ${res.status})`;
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const v = reader.result;
+      if (typeof v === "string") resolve(v.split(",")[1] ?? "");
+      else reject(new Error("FileReader returned non-string"));
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
 export function LocationsClient({ initial }: { initial: Location[] }) {
@@ -180,6 +195,7 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
         <table className="w-full text-sm">
           <thead className="bg-stone-50 text-left text-xs uppercase tracking-wide text-stone-500">
             <tr>
+              <th className="px-3 py-2">Logo</th>
               <th className="px-3 py-2">Name</th>
               <th className="px-3 py-2">Lat / Lon</th>
               <th className="px-3 py-2">Sites</th>
@@ -191,7 +207,7 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
           <tbody>
             {locations.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-stone-500">
+                <td colSpan={7} className="px-3 py-6 text-center text-stone-500">
                   No locations yet. Add one above.
                 </td>
               </tr>
@@ -199,9 +215,31 @@ export function LocationsClient({ initial }: { initial: Location[] }) {
             {locations.map((loc) => (
               <tr key={loc.id} className="border-t border-stone-100">
                 {editingId === loc.id ? (
-                  <EditRow loc={loc} onSave={(p) => handleUpdate(loc.id, p)} onCancel={() => setEditingId(null)} />
+                  <EditRow
+                    loc={loc}
+                    onSave={(p) => handleUpdate(loc.id, p)}
+                    onCancel={() => setEditingId(null)}
+                    onLogoUploaded={() => {
+                      void refresh();
+                    }}
+                    onError={(msg) => setError(msg)}
+                  />
                 ) : (
                   <>
+                    <td className="px-3 py-2">
+                      {loc.logo_url ? (
+                        <Image
+                          src={loc.logo_url}
+                          alt={`${loc.name} logo`}
+                          width={64}
+                          height={32}
+                          unoptimized
+                          className="h-8 w-auto object-contain"
+                        />
+                      ) : (
+                        <span className="text-xs text-stone-400">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 font-medium">{loc.name}</td>
                     <td className="px-3 py-2 font-mono text-xs text-stone-600">
                       {loc.latitude.toFixed(4)}, {loc.longitude.toFixed(4)}
@@ -263,10 +301,14 @@ function EditRow({
   loc,
   onSave,
   onCancel,
+  onLogoUploaded,
+  onError,
 }: {
   loc: Location;
   onSave: (p: Partial<Location>) => void;
   onCancel: () => void;
+  onLogoUploaded: () => void;
+  onError: (msg: string) => void;
 }) {
   const [form, setForm] = useState({
     name: loc.name,
@@ -276,8 +318,50 @@ function EditRow({
     active: loc.active,
     sitesText: loc.sites.join("\n"),
   });
+  const [logoBusy, setLogoBusy] = useState(false);
+
+  async function uploadLogo(file: File) {
+    setLogoBusy(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const res = await fetch(`/api/locations/${loc.id}/logo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: base64,
+          contentType: file.type || "image/png",
+          filename: file.name,
+        }),
+      });
+      if (!res.ok) {
+        onError(`Logo upload failed — ${await readError(res, "Logo upload")}`);
+        return;
+      }
+      onLogoUploaded();
+    } finally {
+      setLogoBusy(false);
+    }
+  }
+
+  async function removeLogo() {
+    if (!confirm("Remove the logo for this location?")) return;
+    setLogoBusy(true);
+    try {
+      const res = await fetch(`/api/locations/${loc.id}/logo`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        onError(`Remove logo failed — ${await readError(res, "Remove logo")}`);
+        return;
+      }
+      onLogoUploaded();
+    } finally {
+      setLogoBusy(false);
+    }
+  }
+
   return (
-    <td colSpan={6} className="px-3 py-2">
+    <td colSpan={7} className="px-3 py-2">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-12">
         <input
           value={form.name}
@@ -319,6 +403,67 @@ function EditRow({
           />
           active
         </label>
+        <div className="sm:col-span-12">
+          <label className="block text-xs font-medium text-stone-600">
+            Logo
+          </label>
+          <p className="text-xs text-stone-500">
+            Shown on the dashboard for this location and embedded in copy-share
+            images. PNG, JPEG, WebP, GIF or SVG. Square or wide aspect ratios
+            both work.
+          </p>
+          <div className="mt-2 flex flex-wrap items-start gap-3">
+            {loc.logo_url ? (
+              <div className="flex items-center gap-2 rounded border border-stone-200 bg-stone-50 p-2">
+                <Image
+                  src={loc.logo_url}
+                  alt={`${loc.name} logo`}
+                  width={120}
+                  height={64}
+                  unoptimized
+                  className="h-12 w-auto object-contain"
+                />
+                <button
+                  type="button"
+                  onClick={removeLogo}
+                  disabled={logoBusy}
+                  className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : null}
+            <div className="min-w-[260px] flex-1">
+              <ImageDropZone
+                compact
+                onFile={uploadLogo}
+                hint={
+                  loc.logo_url
+                    ? "Drop or paste a replacement logo"
+                    : "Drop or paste a logo"
+                }
+                subhint={
+                  <>
+                    Paste with{" "}
+                    <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-[11px]">
+                      Ctrl
+                    </kbd>
+                    +
+                    <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-[11px]">
+                      V
+                    </kbd>
+                    , drop a file, or
+                  </>
+                }
+              />
+              {logoBusy && (
+                <span className="mt-1 inline-block text-xs text-stone-500">
+                  Uploading…
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
         <div className="sm:col-span-12">
           <label className="block text-xs font-medium text-stone-600">
             Sites (one per line)

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Location } from "@/lib/airtable";
 import { rectify, canvasToJpegBlob, type CornerSet } from "@/lib/homography";
+import { ImageDropZone } from "@/components/ImageDropZone";
 import { RectifiedCanvasView } from "@/components/RectifiedCanvasView";
 import { diseasePercentFromFoci } from "@/lib/foci-coverage";
 import { PinCanvas } from "./PinCanvas";
@@ -115,7 +116,34 @@ export function AssessClient({ locations }: { locations: Location[] }) {
         />
       )}
 
-      {step.kind === "idle" && <FileDrop onFile={handleFile} />}
+      {step.kind === "idle" && (
+        <ImageDropZone
+          onFile={handleFile}
+          accept="image/jpeg,image/png,image/heic,image/heif,image/webp"
+          hint="Drop or paste a quadrat photo"
+          subhint={
+            <>
+              Paste straight from WhatsApp Web with{" "}
+              <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-[11px]">
+                Ctrl
+              </kbd>
+              +
+              <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-[11px]">
+                V
+              </kbd>
+              {" "}(or{" "}
+              <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-[11px]">
+                ⌘
+              </kbd>
+              +
+              <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-[11px]">
+                V
+              </kbd>
+              {" "}on Mac), drag a file from a folder, or
+            </>
+          }
+        />
+      )}
 
       {step.kind === "loaded" && (
         <DateAndLocation
@@ -352,104 +380,6 @@ function ContextBar({
         Change
       </button>
     </div>
-  );
-}
-
-function FileDrop({ onFile }: { onFile: (f: File) => void }) {
-  const [drag, setDrag] = useState(false);
-  const [pasted, setPasted] = useState(false);
-
-  // Listen for paste anywhere on the page while we're showing the dropzone.
-  // Picks up the first image item on the clipboard (WhatsApp Web, Slack,
-  // screenshot tools etc.) and feeds it into the same pipeline as drop.
-  useEffect(() => {
-    function handlePaste(e: ClipboardEvent) {
-      const target = e.target as HTMLElement | null;
-      // Don't intercept paste when the user is typing into an input.
-      if (
-        target &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA")
-      ) {
-        return;
-      }
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (item.kind !== "file") continue;
-        if (!item.type.startsWith("image/")) continue;
-        const blob = item.getAsFile();
-        if (!blob) continue;
-        e.preventDefault();
-        const ext = item.type.split("/")[1] ?? "png";
-        const filename = `clipboard-${Date.now()}.${ext}`;
-        const file = new File([blob], filename, { type: item.type });
-        setPasted(true);
-        onFile(file);
-        return;
-      }
-    }
-    window.addEventListener("paste", handlePaste);
-    return () => window.removeEventListener("paste", handlePaste);
-  }, [onFile]);
-
-  return (
-    <label
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDrag(true);
-      }}
-      onDragLeave={() => setDrag(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDrag(false);
-        const f = e.dataTransfer.files?.[0];
-        if (f) onFile(f);
-      }}
-      className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-12 text-center transition-colors ${
-        drag
-          ? "border-stone-900 bg-stone-100"
-          : "border-stone-300 bg-white hover:bg-stone-50"
-      }`}
-    >
-      <span className="text-base font-medium">
-        Drop, paste, or choose a quadrat photo
-      </span>
-      <span className="text-sm text-stone-500">
-        JPEG, PNG, or HEIC. Drag from a folder, paste with{" "}
-        <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-xs">
-          Ctrl
-        </kbd>
-        +
-        <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-xs">
-          V
-        </kbd>{" "}
-        (or{" "}
-        <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-xs">
-          ⌘
-        </kbd>
-        +
-        <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-xs">
-          V
-        </kbd>{" "}
-        on Mac) straight from WhatsApp Web, or click below.
-      </span>
-      <input
-        type="file"
-        accept="image/jpeg,image/png,image/heic,image/heif"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) onFile(f);
-        }}
-      />
-      <span className="mt-2 inline-block rounded bg-stone-900 px-3 py-1.5 text-sm text-white">
-        Choose a file
-      </span>
-      {pasted && (
-        <span className="text-xs text-green-700">Image pasted from clipboard.</span>
-      )}
-    </label>
   );
 }
 

@@ -106,6 +106,7 @@ export function PressurePanels({
   photosByDate,
   onSelectPhotoDate,
   locationName,
+  locationLogoUrl,
   photos,
   syncedAtIso,
   caughtUpDays = 0,
@@ -117,6 +118,7 @@ export function PressurePanels({
   photosByDate?: Map<string, number>;
   onSelectPhotoDate?: (date: string) => void;
   locationName?: string;
+  locationLogoUrl?: string | null;
   photos?: PhotoAssessment[];
   /** Server timestamp the data was fetched at. */
   syncedAtIso?: string | null;
@@ -186,6 +188,7 @@ export function PressurePanels({
           : inWindow.reduce((s, p) => s + p.disease_pct, 0) / inWindow.length;
       const blob = await buildShareCard({
         locationName: locationName ?? "Location",
+        locationLogoUrl: locationLogoUrl ?? null,
         scores,
         forecast,
         photoCount: inWindow.length,

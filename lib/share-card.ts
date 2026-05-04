@@ -20,6 +20,8 @@ import type { ForecastPressureRow } from "./forecast-pressure";
 
 export type ShareCardInput = {
   locationName: string;
+  /** Optional public URL of the location's own logo. */
+  locationLogoUrl?: string | null;
   scores: PressureScore[];
   forecast: ForecastPressureRow[];
   photoCount: number;
@@ -46,17 +48,16 @@ export async function buildShareCard(input: ShareCardInput): Promise<Blob> {
   ctx.scale(SCALE, SCALE);
   ctx.imageSmoothingEnabled = true;
 
-  // Best-effort logo load — if it 404s for any reason we still produce a
-  // valid card without it.
-  let logo: HTMLImageElement | null = null;
-  try {
-    logo = await loadImage("/stri-logo.png");
-  } catch {
-    logo = null;
-  }
+  // Best-effort logo loads — if any fails we still produce a valid card.
+  const [striLogo, locationLogo] = await Promise.all([
+    loadImage("/stri-logo.png").catch(() => null),
+    input.locationLogoUrl
+      ? loadImage(input.locationLogoUrl).catch(() => null)
+      : Promise.resolve(null),
+  ]);
 
   drawBackground(ctx);
-  drawHeader(ctx, input, logo);
+  drawHeader(ctx, input, striLogo, locationLogo);
   drawStatTiles(ctx, input);
   drawChart(ctx, input);
   drawFooter(ctx);
@@ -87,17 +88,26 @@ function drawBackground(ctx: CanvasRenderingContext2D) {
 function drawHeader(
   ctx: CanvasRenderingContext2D,
   input: ShareCardInput,
-  logo: HTMLImageElement | null
+  striLogo: HTMLImageElement | null,
+  locationLogo: HTMLImageElement | null
 ) {
+  // Left side: optional location logo, then location name + subline.
+  let textX = 40;
+  if (locationLogo && locationLogo.naturalWidth && locationLogo.naturalHeight) {
+    const targetH = 56;
+    const ratio = locationLogo.naturalWidth / locationLogo.naturalHeight;
+    const drawW = targetH * ratio;
+    ctx.drawImage(locationLogo, 40, 28, drawW, targetH);
+    textX = 40 + drawW + 16;
+  }
   ctx.fillStyle = "#1c1917";
   ctx.font = "bold 32px ui-sans-serif, system-ui, -apple-system, sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
-  ctx.fillText(input.locationName, 40, 32);
-
+  ctx.fillText(input.locationName, textX, 32);
   ctx.fillStyle = "#57534e";
   ctx.font = "16px ui-sans-serif, system-ui, sans-serif";
-  ctx.fillText("Dollar spot pressure", 40, 72);
+  ctx.fillText("Dollar spot pressure", textX, 72);
 
   // Right side: STRI logo (if loaded) above the generated-on date.
   const today = new Date();
@@ -107,13 +117,13 @@ function drawHeader(
     year: "numeric",
   });
 
-  if (logo && logo.naturalWidth && logo.naturalHeight) {
+  if (striLogo && striLogo.naturalWidth && striLogo.naturalHeight) {
     const targetH = 56;
-    const ratio = logo.naturalWidth / logo.naturalHeight;
+    const ratio = striLogo.naturalWidth / striLogo.naturalHeight;
     const drawW = targetH * ratio;
     const x = W - 40 - drawW;
     const y = 24;
-    ctx.drawImage(logo, x, y, drawW, targetH);
+    ctx.drawImage(striLogo, x, y, drawW, targetH);
     ctx.fillStyle = "#78716c";
     ctx.font = "13px ui-sans-serif, system-ui, sans-serif";
     ctx.textAlign = "right";

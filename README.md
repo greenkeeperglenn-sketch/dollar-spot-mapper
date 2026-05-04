@@ -45,6 +45,7 @@ and must match exactly.
 | `notes` | Long text |
 | `active` | Checkbox |
 | `sites` | Long text — optional, one site name per line (e.g. `Chipping green`, `11th tee`); these populate the Site dropdown when assessing a photo |
+| `logo_url` | URL — optional, public URL of the location's logo. Set automatically when you paste/drop a logo on the Locations page (uploaded to Vercel Blob); also displayed on the dashboard and in copy-share images |
 
 #### `WeatherReadings`
 

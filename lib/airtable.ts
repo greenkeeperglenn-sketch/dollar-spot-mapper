@@ -29,6 +29,8 @@ export type Location = {
   /** Site names (e.g. "Chipping green", "11th tee") for this location's
    *  Assess-photo dropdown. Stored newline-separated in the `sites` field. */
   sites: string[];
+  /** Public URL of the location's branding logo (Vercel Blob). */
+  logo_url?: string;
 };
 
 export type WeatherReading = {
@@ -155,6 +157,8 @@ type LocationFields = {
   active?: boolean;
   /** Newline-separated list of site names. Optional. */
   sites?: string;
+  /** Public URL of the location's logo (set by the server after upload). */
+  logo_url?: string;
 };
 
 function parseSites(raw: string | undefined): string[] {
@@ -174,6 +178,7 @@ function rowToLocation(r: AirtableRecord<LocationFields>): Location {
     notes: r.fields.notes,
     active: r.fields.active ?? false,
     sites: parseSites(r.fields.sites),
+    logo_url: r.fields.logo_url || undefined,
   };
 }
 
@@ -237,6 +242,7 @@ export async function updateLocation(
     notes: string;
     active: boolean;
     sites: string[];
+    logo_url: string | null;
   }>
 ): Promise<Location> {
   const fields: LocationFields = {} as LocationFields;
@@ -246,6 +252,7 @@ export async function updateLocation(
   if (patch.notes !== undefined) fields.notes = patch.notes;
   if (patch.active !== undefined) fields.active = patch.active;
   if (patch.sites !== undefined) fields.sites = patch.sites.join("\n");
+  if (patch.logo_url !== undefined) fields.logo_url = patch.logo_url ?? "";
   const r = await request<AirtableRecord<LocationFields>>(
     `${encodeURIComponent(TABLES.locations)}/${id}`,
     { method: "PATCH", body: JSON.stringify({ fields }) }

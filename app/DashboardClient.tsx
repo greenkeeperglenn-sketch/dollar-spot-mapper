@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { Location, PhotoAssessment, PressureScore } from "@/lib/airtable";
@@ -121,9 +122,21 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
     );
   }
 
+  const selectedLocation = active.find((l) => l.id === selectedId);
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        {selectedLocation?.logo_url && (
+          <Image
+            src={selectedLocation.logo_url}
+            alt={`${selectedLocation.name} logo`}
+            width={120}
+            height={56}
+            unoptimized
+            className="h-14 w-auto rounded border border-stone-200 bg-white object-contain p-1"
+          />
+        )}
         <label className="text-sm font-medium text-stone-700">Location</label>
         <select
           value={selectedId}
@@ -172,9 +185,8 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
           onSelectPhotoDate={(d) =>
             setViewingDate((prev) => (prev === d ? null : d))
           }
-          locationName={
-            active.find((l) => l.id === selectedId)?.name ?? "Location"
-          }
+          locationName={selectedLocation?.name ?? "Location"}
+          locationLogoUrl={selectedLocation?.logo_url ?? null}
           photos={photos ?? []}
           syncedAtIso={syncedAt}
           caughtUpDays={caughtUpDays}
