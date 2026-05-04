@@ -264,7 +264,11 @@ function drawChart(ctx: CanvasRenderingContext2D, input: ShareCardInput) {
     points.length === 1
       ? left + chartW / 2
       : left + (i / (points.length - 1)) * chartW;
-  const yFor = (v: number) => bottom - v * chartH; // domain 0..1
+  // Y-axis caps at 60% by default to match the dashboard, but auto-grows
+  // if any value exceeds it so we never hide a spike.
+  const observedMax = points.reduce((m, p) => Math.max(m, p.value), 0);
+  const yMax = Math.max(0.6, observedMax * 1.1);
+  const yFor = (v: number) => bottom - (v / yMax) * chartH;
 
   // Risk-band shading — translucent washes to match the dashboard.
   ctx.fillStyle = "rgba(34, 197, 94, 0.12)"; // green-500 @ 12%
@@ -274,14 +278,14 @@ function drawChart(ctx: CanvasRenderingContext2D, input: ShareCardInput) {
   ctx.fillStyle = "rgba(239, 68, 68, 0.22)"; // red-500 @ 22%
   ctx.fillRect(left, top, chartW, yFor(0.3) - top);
 
-  // Y-axis ticks
+  // Y-axis ticks: every 10% from 0 up to yMax (rounded up).
   ctx.fillStyle = "#78716c";
   ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
-  for (const v of [0, 0.2, 0.4, 0.6, 0.8, 1.0]) {
+  const tickStep = 0.1;
+  for (let v = 0; v <= yMax + 1e-9; v += tickStep) {
     ctx.fillText(`${Math.round(v * 100)}%`, left - 6, yFor(v));
-    // gridline
     ctx.beginPath();
     ctx.strokeStyle = "rgba(0,0,0,0.06)";
     ctx.lineWidth = 1;

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Location, PhotoAssessment, PressureScore } from "@/lib/airtable";
 import type { ForecastPressureRow } from "@/lib/forecast-pressure";
 import { HeroSummary, type Range } from "@/components/HeroSummary";
+import { PhaseGrid } from "@/components/PhaseGrid";
 import { PhotoStrip } from "@/components/PhotoStrip";
 import { PhotoTrendPanels } from "@/components/PhotoTrendPanels";
 import { PressurePanels } from "@/components/PressurePanels";
@@ -242,6 +243,7 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
             Show more detail (decomposition, raw inputs, photo trends)
           </summary>
           <div className="space-y-6 border-t border-stone-200 p-4">
+            <PhaseGrid scores={scores} forecast={forecast} />
             <PressurePanels
               scores={scores}
               forecast={forecast}
