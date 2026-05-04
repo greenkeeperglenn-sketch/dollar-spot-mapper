@@ -347,28 +347,34 @@ function drawChart(ctx: CanvasRenderingContext2D, input: ShareCardInput) {
     ctx.fillText("Today", xFor(lastActual) + 4, top + 4);
   }
 
-  // Photo markers (numbered count circles)
+  // Photo markers — map-pin shape with the count inside, tip pointing
+  // down at the chart axis. The pin's tip sits at `pinTipY` and the body
+  // extends ~44px upward; we lower the tip from the chart top so the pin
+  // fits cleanly inside the chart area.
   const countByDate = new Map<string, number>();
   for (const d of input.photoDates) {
     countByDate.set(d, (countByDate.get(d) ?? 0) + 1);
   }
+  const pinTipY = top + 50;
   for (let i = 0; i < points.length; i++) {
     const count = countByDate.get(points[i].date);
     if (!count) continue;
     const x = xFor(i);
-    const y = top + 18;
-    ctx.beginPath();
+    const path = new Path2D(
+      `M ${x} ${pinTipY} L ${x - 11} ${pinTipY - 16} A 16 16 0 1 1 ${
+        x + 11
+      } ${pinTipY - 16} Z`
+    );
     ctx.fillStyle = PHOTO;
-    ctx.arc(x, y, 11, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineWidth = 2;
+    ctx.fill(path);
+    ctx.lineWidth = 2.5;
     ctx.strokeStyle = "#ffffff";
-    ctx.stroke();
+    ctx.stroke(path);
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 12px ui-sans-serif, system-ui, sans-serif";
+    ctx.font = "bold 16px ui-sans-serif, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(count > 9 ? "9+" : String(count), x, y + 1);
+    ctx.fillText(count > 9 ? "9+" : String(count), x, pinTipY - 28);
   }
 
   // X-axis labels (sparse: first, last, today, plus a few)

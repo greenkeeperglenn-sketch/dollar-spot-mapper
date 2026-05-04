@@ -115,7 +115,9 @@ export function HeroSummary({
       return Math.max(m, r.prob_actual ?? 0, r.prob_forecast ?? 0);
     }, 0);
     const yMax = Math.max(0.6, observedMax * 1.1);
-    const markerY = yMax * 0.95;
+    // Lowered slightly from the top so the upward-pointing pin (~44px tall)
+    // fits within the chart area without being clipped.
+    const markerY = yMax * 0.83;
     for (const r of rows) {
       const c = photoCountByDate.get(r.date);
       if (c) {
@@ -498,21 +500,25 @@ function CameraDot(props: DotProps) {
   if (cx == null || cy == null) return null;
   const count = payload?.photo_count ?? 0;
   if (!count) return null;
+  // Map-pin shape: tip at (cx, cy), circle above. r=16 circle centered
+  // at (cx, cy-28). Tangent points at (cx±11, cy-16).
+  const pinPath = `M ${cx} ${cy} L ${cx - 11} ${cy - 16} A 16 16 0 1 1 ${
+    cx + 11
+  } ${cy - 16} Z`;
   return (
     <g pointerEvents="all">
-      <circle
-        cx={cx}
-        cy={cy}
-        r={11}
+      <path
+        d={pinPath}
         fill={PHOTO}
         stroke="#ffffff"
-        strokeWidth={2}
+        strokeWidth={2.5}
       />
       <text
         x={cx}
-        y={cy + 4}
+        y={cy - 28}
         textAnchor="middle"
-        fontSize={12}
+        dominantBaseline="central"
+        fontSize={16}
         fontWeight={700}
         fill="#ffffff"
       >
