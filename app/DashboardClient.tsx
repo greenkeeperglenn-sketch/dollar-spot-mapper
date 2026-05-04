@@ -1,10 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { Location, PhotoAssessment, PressureScore } from "@/lib/airtable";
 import type { ForecastPressureRow } from "@/lib/forecast-pressure";
+import { HeroSummary, type Range } from "@/components/HeroSummary";
 import { PhotoTrendPanels } from "@/components/PhotoTrendPanels";
 import { PressurePanels } from "@/components/PressurePanels";
 import { StoredAssessmentReview } from "@/components/StoredAssessmentReview";
@@ -20,9 +20,28 @@ async function readError(res: Response): Promise<string> {
   return text.slice(0, 500) || `HTTP ${res.status}`;
 }
 
+function rangeToDays(range: Range): number {
+  if (range === "30d") return 30;
+  if (range === "90d") return 90;
+  // season: days since 1 March of the current year (or the most recent past
+  // 1 March if today is in Jan/Feb).
+  const now = new Date();
+  let year = now.getUTCFullYear();
+  const seasonStart = new Date(Date.UTC(year, 2, 1));
+  if (now < seasonStart) {
+    year -= 1;
+    seasonStart.setUTCFullYear(year);
+  }
+  const days = Math.ceil(
+    (now.getTime() - seasonStart.getTime()) / 86_400_000
+  );
+  return Math.max(30, Math.min(365, days));
+}
+
 export function DashboardClient({ locations }: { locations: Location[] }) {
   const active = useMemo(() => locations.filter((l) => l.active), [locations]);
   const [selectedId, setSelectedId] = useState<string>(active[0]?.id ?? "");
+  const [range, setRange] = useState<Range>("30d");
   const [scores, setScores] = useState<PressureScore[] | null>(null);
   const [forecast, setForecast] = useState<ForecastPressureRow[]>([]);
   const [photos, setPhotos] = useState<PhotoAssessment[] | null>(null);
@@ -33,7 +52,7 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
   const [caughtUpDays, setCaughtUpDays] = useState(0);
   const [catchUpError, setCatchUpError] = useState<string | null>(null);
 
-  // Reset selection when location changes.
+  // Reset selection + range when location changes.
   useEffect(() => {
     setViewingDate(null);
   }, [selectedId]);
@@ -69,9 +88,11 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
     setLoading(true);
     setError(null);
 
+    const days = rangeToDays(range);
+
     Promise.all([
       fetch(
-        `/api/pressure?locationId=${selectedId}&days=30&forecastDays=14`,
+        `/api/pressure?locationId=${selectedId}&days=${days}&forecastDays=14`,
         { cache: "no-store" }
       ).then(async (r) => {
         if (!r.ok) throw new Error(await readError(r));
@@ -108,7 +129,7 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
     return () => {
       cancelled = true;
     };
-  }, [selectedId]);
+  }, [selectedId, range]);
 
   if (active.length === 0) {
     return (
@@ -127,16 +148,6 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
-        {selectedLocation?.logo_url && (
-          <Image
-            src={selectedLocation.logo_url}
-            alt={`${selectedLocation.name} logo`}
-            width={120}
-            height={56}
-            unoptimized
-            className="h-14 w-auto rounded border border-stone-200 bg-white object-contain p-1"
-          />
-        )}
         <label className="text-sm font-medium text-stone-700">Location</label>
         <select
           value={selectedId}
@@ -178,16 +189,17 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
       )}
 
       {scores && scores.length > 0 && (
-        <PressurePanels
+        <HeroSummary
+          locationName={selectedLocation?.name ?? "Location"}
+          locationLogoUrl={selectedLocation?.logo_url ?? null}
           scores={scores}
           forecast={forecast}
-          photosByDate={photoCountByDate}
+          photos={photos ?? []}
+          range={range}
+          onRangeChange={setRange}
           onSelectPhotoDate={(d) =>
             setViewingDate((prev) => (prev === d ? null : d))
           }
-          locationName={selectedLocation?.name ?? "Location"}
-          locationLogoUrl={selectedLocation?.logo_url ?? null}
-          photos={photos ?? []}
           syncedAtIso={syncedAt}
           caughtUpDays={caughtUpDays}
           catchUpError={catchUpError}
@@ -213,13 +225,36 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
         </section>
       )}
 
-      {photos && (
-        <PhotoTrendPanels
-          photos={photos}
-          onSelectDate={(d) =>
-            setViewingDate((prev) => (prev === d ? null : d))
-          }
-        />
+      {scores && scores.length > 0 && (
+        <details className="rounded-lg border border-stone-200 bg-white">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-stone-700 hover:bg-stone-50">
+            Show more detail (decomposition, raw inputs, photo trends)
+          </summary>
+          <div className="space-y-6 border-t border-stone-200 p-4">
+            <PressurePanels
+              scores={scores}
+              forecast={forecast}
+              photosByDate={photoCountByDate}
+              onSelectPhotoDate={(d) =>
+                setViewingDate((prev) => (prev === d ? null : d))
+              }
+              locationName={selectedLocation?.name ?? "Location"}
+              locationLogoUrl={selectedLocation?.logo_url ?? null}
+              photos={photos ?? []}
+              syncedAtIso={syncedAt}
+              caughtUpDays={caughtUpDays}
+              catchUpError={catchUpError}
+            />
+            {photos && (
+              <PhotoTrendPanels
+                photos={photos}
+                onSelectDate={(d) =>
+                  setViewingDate((prev) => (prev === d ? null : d))
+                }
+              />
+            )}
+          </div>
+        </details>
       )}
     </div>
   );
