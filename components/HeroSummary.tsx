@@ -202,7 +202,7 @@ export function HeroSummary({
             width={120}
             height={64}
             unoptimized
-            className="h-14 w-auto rounded border border-stone-200 bg-white object-contain p-1 sm:h-16"
+            className="h-20 w-auto rounded border border-stone-200 bg-white object-contain p-1.5 sm:h-24"
           />
         )}
         <div className="min-w-0 flex-1">
@@ -219,7 +219,7 @@ export function HeroSummary({
           width={108}
           height={40}
           priority
-          className="h-8 w-auto sm:h-10"
+          className="h-12 w-auto sm:h-16"
         />
       </header>
 
@@ -330,14 +330,14 @@ export function HeroSummary({
               labelFormatter={(l) => `Date: ${l}`}
             />
             {/* Risk-band shading */}
-            <ReferenceArea y1={0} y2={0.2} fill="#dcfce7" fillOpacity={0.4} />
+            <ReferenceArea y1={0} y2={0.2} fill="#22c55e" fillOpacity={0.12} />
             <ReferenceArea
               y1={0.2}
               y2={0.3}
-              fill="#fef3c7"
-              fillOpacity={0.5}
+              fill="#f59e0b"
+              fillOpacity={0.18}
             />
-            <ReferenceArea y1={0.3} y2={1} fill="#fee2e2" fillOpacity={0.5} />
+            <ReferenceArea y1={0.3} y2={1} fill="#ef4444" fillOpacity={0.22} />
             {todayLabel && (
               <ReferenceLine
                 x={todayLabel}
@@ -419,7 +419,7 @@ function Tile({
   const palette = showColour ? bandPalette(band) : neutralPalette();
   return (
     <div
-      className="rounded-lg border-2 p-4 sm:p-5"
+      className="flex flex-col items-center rounded-lg border-2 p-4 text-center sm:p-5"
       style={{ background: palette.bg, borderColor: palette.border }}
     >
       <div
