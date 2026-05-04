@@ -331,7 +331,10 @@ export function HeroSummary({
               formatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
               labelFormatter={(l) => `Date: ${l}`}
             />
-            {/* Risk-band shading */}
+            {/* Risk-band shading. y2 caps at yMax (which is 0.6 by default,
+                grows above 60% if data exceeds) — using y2={1} like before
+                left the red band clipped by Recharts because it sat outside
+                the chart's y-domain. */}
             <ReferenceArea y1={0} y2={0.2} fill="#22c55e" fillOpacity={0.12} />
             <ReferenceArea
               y1={0.2}
@@ -339,7 +342,12 @@ export function HeroSummary({
               fill="#f59e0b"
               fillOpacity={0.18}
             />
-            <ReferenceArea y1={0.3} y2={1} fill="#ef4444" fillOpacity={0.22} />
+            <ReferenceArea
+              y1={0.3}
+              y2={yMax}
+              fill="#ef4444"
+              fillOpacity={0.22}
+            />
             {todayLabel && (
               <ReferenceLine
                 x={todayLabel}

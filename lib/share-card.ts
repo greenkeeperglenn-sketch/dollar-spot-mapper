@@ -206,17 +206,20 @@ function drawTile(
   ctx.strokeStyle = spec.border;
   ctx.stroke();
 
-  ctx.textAlign = "left";
+  // Centre everything horizontally inside the tile so the layout matches
+  // the dashboard.
+  const cx = x + w / 2;
+  ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.fillStyle = spec.fg;
   ctx.font = "bold 12px ui-sans-serif, system-ui, sans-serif";
-  ctx.fillText(spec.label.toUpperCase(), x + 20, y + 18);
+  ctx.fillText(spec.label.toUpperCase(), cx, y + 18);
 
   ctx.font = "bold 56px ui-sans-serif, system-ui, sans-serif";
-  ctx.fillText(spec.big, x + 20, y + 50);
+  ctx.fillText(spec.big, cx, y + 50);
 
   ctx.font = "14px ui-sans-serif, system-ui, sans-serif";
-  ctx.fillText(spec.sub, x + 20, y + h - 30);
+  ctx.fillText(spec.sub, cx, y + h - 30);
 }
 
 function drawChart(ctx: CanvasRenderingContext2D, input: ShareCardInput) {
