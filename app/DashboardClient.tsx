@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Location, PhotoAssessment, PressureScore } from "@/lib/airtable";
 import type { ForecastPressureRow } from "@/lib/forecast-pressure";
 import { HeroSummary, type Range } from "@/components/HeroSummary";
+import { PhotoStrip } from "@/components/PhotoStrip";
 import { PhotoTrendPanels } from "@/components/PhotoTrendPanels";
 import { PressurePanels } from "@/components/PressurePanels";
 import { StoredAssessmentReview } from "@/components/StoredAssessmentReview";
@@ -203,6 +204,16 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
           syncedAtIso={syncedAt}
           caughtUpDays={caughtUpDays}
           catchUpError={catchUpError}
+        />
+      )}
+
+      {photos && (
+        <PhotoStrip
+          photos={photos}
+          onSelect={(d) =>
+            setViewingDate((prev) => (prev === d ? null : d))
+          }
+          selectedDate={viewingDate}
         />
       )}
 

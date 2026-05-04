@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -133,6 +133,20 @@ export function HeroSummary({
   const yMax = Math.max(0.6, observedMax * 1.1);
   const todayLabel = today ? fmt(today.date) : null;
   const minChartWidth = Math.max(400, data.length * PX_PER_DAY);
+
+  // Scroll the chart all the way to the right whenever the data set changes,
+  // so the user always sees Today + the forecast first. They can swipe back
+  // to look at older history.
+  const chartScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = chartScrollRef.current;
+    if (!el) return;
+    // Wait a frame so the inner chart has rendered at its full width.
+    const id = requestAnimationFrame(() => {
+      el.scrollLeft = el.scrollWidth;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [data.length, minChartWidth]);
 
   // Copy-share state
   const [shareStatus, setShareStatus] = useState<
@@ -289,8 +303,9 @@ export function HeroSummary({
         </div>
       </div>
 
-      {/* Scrollable chart */}
-      <div className="overflow-x-auto">
+      {/* Scrollable chart — defaults scrolled to the right so the forecast
+           is on screen immediately. */}
+      <div ref={chartScrollRef} className="overflow-x-auto">
         <div style={{ minWidth: `${minChartWidth}px`, height: 300 }}>
           <ComposedChart
             data={data}
