@@ -333,21 +333,44 @@ function drawChart(ctx: CanvasRenderingContext2D, input: ShareCardInput) {
     ctx.setLineDash([]);
   }
 
-  // Today vertical line
+  // Today: dashed vertical line + a styled date pill at the top with a
+  // small downward arrow into the line. Replaces the old plain "Today"
+  // text label so the dotted line is anchored to a clear date.
   if (lastActual >= 0) {
+    const tx = xFor(lastActual);
+    // Dashed line
     ctx.beginPath();
     ctx.strokeStyle = "#1c1917";
     ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 4]);
-    ctx.moveTo(xFor(lastActual), top);
-    ctx.lineTo(xFor(lastActual), bottom);
+    ctx.moveTo(tx, top);
+    ctx.lineTo(tx, bottom);
     ctx.stroke();
     ctx.setLineDash([]);
+    // Date pill (rounded rect with the actual date + arrow)
+    const dateStr = formatShortDate(points[lastActual].date);
+    ctx.font = "bold 13px ui-sans-serif, system-ui, sans-serif";
+    const padX = 10;
+    const textW = ctx.measureText(dateStr).width;
+    const pillW = textW + padX * 2;
+    const pillH = 24;
+    const pillX = tx - pillW / 2;
+    const pillY = top + 4;
+    roundRect(ctx, pillX, pillY, pillW, pillH, 6);
     ctx.fillStyle = "#1c1917";
-    ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText("Today", xFor(lastActual) + 4, top + 4);
+    ctx.fill();
+    // Downward arrow tip pointing into the dashed line
+    ctx.beginPath();
+    ctx.moveTo(tx - 6, pillY + pillH);
+    ctx.lineTo(tx + 6, pillY + pillH);
+    ctx.lineTo(tx, pillY + pillH + 6);
+    ctx.closePath();
+    ctx.fill();
+    // Date text
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(dateStr, tx, pillY + pillH / 2);
   }
 
   // Photo markers — map-pin shape with the count inside, tip pointing
@@ -380,19 +403,24 @@ function drawChart(ctx: CanvasRenderingContext2D, input: ShareCardInput) {
     ctx.fillText(count > 9 ? "9+" : String(count), x, pinTipY - 28);
   }
 
-  // X-axis labels (sparse: first, last, today, plus a few)
+  // X-axis labels — sparse, evenly-spaced including the first and last
+  // points. Today is no longer added here (its date is on the pill at
+  // the top of the dashed line) so we don't double-up close to the stride
+  // ticks. Labels are angled -30° so they don't overlap on dense ranges.
   const labelIxs = new Set<number>([0, points.length - 1]);
-  if (lastActual >= 0) labelIxs.add(lastActual);
-  // add a few intermediate ticks for context
   const stride = Math.max(1, Math.floor(points.length / 6));
   for (let i = 0; i < points.length; i += stride) labelIxs.add(i);
 
   ctx.fillStyle = "#57534e";
   ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
   for (const i of labelIxs) {
-    ctx.fillText(formatShortDate(points[i].date), xFor(i), bottom + 6);
+    ctx.save();
+    ctx.translate(xFor(i), bottom + 8);
+    ctx.rotate(-Math.PI / 6); // -30°
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillText(formatShortDate(points[i].date), 0, 0);
+    ctx.restore();
   }
 
   // Tiny inline legend

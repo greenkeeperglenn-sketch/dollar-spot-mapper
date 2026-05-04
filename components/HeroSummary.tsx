@@ -353,12 +353,7 @@ export function HeroSummary({
                 x={todayLabel}
                 stroke="#1c1917"
                 strokeDasharray="4 4"
-                label={{
-                  value: "Today",
-                  position: "insideTop",
-                  fontSize: 11,
-                  fill: "#1c1917",
-                }}
+                label={renderTodayPill(todayLabel)}
               />
             )}
             <Line
@@ -503,6 +498,52 @@ type DotProps = {
   cy?: number;
   payload?: ChartRow;
 };
+type TodayLabelProps = { viewBox?: { x?: number; y?: number } };
+
+function renderTodayPill(date: string) {
+  return function TodayPill(props: TodayLabelProps) {
+    const vb = props.viewBox;
+    const lineX = vb?.x;
+    const top = vb?.y;
+    if (lineX == null || top == null) return null;
+    const padX = 8;
+    const charW = 7; // rough mono-ish width estimate at 12px
+    const pillW = date.length * charW + padX * 2;
+    const pillH = 22;
+    const pillX = lineX - pillW / 2;
+    const pillY = top + 4;
+    return (
+      <g>
+        <rect
+          x={pillX}
+          y={pillY}
+          width={pillW}
+          height={pillH}
+          rx={5}
+          fill="#1c1917"
+        />
+        <polygon
+          points={`${lineX - 5},${pillY + pillH} ${lineX + 5},${
+            pillY + pillH
+          } ${lineX},${pillY + pillH + 5}`}
+          fill="#1c1917"
+        />
+        <text
+          x={lineX}
+          y={pillY + pillH / 2 + 1}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontSize={12}
+          fontWeight={700}
+          fill="#ffffff"
+        >
+          {date}
+        </text>
+      </g>
+    );
+  };
+}
+
 function CameraDot(props: DotProps) {
   const { cx, cy, payload } = props;
   if (cx == null || cy == null) return null;
