@@ -263,12 +263,12 @@ function drawChart(ctx: CanvasRenderingContext2D, input: ShareCardInput) {
       : left + (i / (points.length - 1)) * chartW;
   const yFor = (v: number) => bottom - v * chartH; // domain 0..1
 
-  // Risk-band shading
-  ctx.fillStyle = "#dcfce7";
+  // Risk-band shading — translucent washes to match the dashboard.
+  ctx.fillStyle = "rgba(34, 197, 94, 0.12)"; // green-500 @ 12%
   ctx.fillRect(left, yFor(0.2), chartW, bottom - yFor(0.2));
-  ctx.fillStyle = "#fef3c7";
+  ctx.fillStyle = "rgba(245, 158, 11, 0.18)"; // amber-500 @ 18%
   ctx.fillRect(left, yFor(0.3), chartW, yFor(0.2) - yFor(0.3));
-  ctx.fillStyle = "#fee2e2";
+  ctx.fillStyle = "rgba(239, 68, 68, 0.22)"; // red-500 @ 22%
   ctx.fillRect(left, top, chartW, yFor(0.3) - top);
 
   // Y-axis ticks
