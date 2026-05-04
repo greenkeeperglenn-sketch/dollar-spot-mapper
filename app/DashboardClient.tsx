@@ -40,8 +40,23 @@ function rangeToDays(range: Range): number {
   return Math.max(30, Math.min(365, days));
 }
 
-export function DashboardClient({ locations }: { locations: Location[] }) {
-  const active = useMemo(() => locations.filter((l) => l.active), [locations]);
+export function DashboardClient({
+  locations,
+  photoCounts = {},
+}: {
+  locations: Location[];
+  photoCounts?: Record<string, number>;
+}) {
+  const active = useMemo(() => {
+    const list = locations.filter((l) => l.active);
+    // Order by photo count descending, ties broken by name.
+    return list.sort((a, b) => {
+      const aCount = photoCounts[a.id] ?? 0;
+      const bCount = photoCounts[b.id] ?? 0;
+      if (aCount !== bCount) return bCount - aCount;
+      return a.name.localeCompare(b.name);
+    });
+  }, [locations, photoCounts]);
   const [selectedId, setSelectedId] = useState<string>(active[0]?.id ?? "");
   const [range, setRange] = useState<Range>("30d");
   const [scores, setScores] = useState<PressureScore[] | null>(null);
@@ -149,19 +164,13 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
 
   return (
     <div className="space-y-6">
+      <LocationStrip
+        locations={active}
+        selectedId={selectedId}
+        photoCounts={photoCounts}
+        onSelect={setSelectedId}
+      />
       <div className="flex flex-wrap items-center gap-3">
-        <label className="text-sm font-medium text-stone-700">Location</label>
-        <select
-          value={selectedId}
-          onChange={(e) => setSelectedId(e.target.value)}
-          className="rounded border border-stone-300 bg-white px-2 py-1 text-sm"
-        >
-          {active.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.name}
-            </option>
-          ))}
-        </select>
         {selectedId && (
           <Link
             href={`/locations/${selectedId}`}
@@ -276,5 +285,85 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
         </details>
       )}
     </div>
+  );
+}
+
+function LocationStrip({
+  locations,
+  selectedId,
+  photoCounts,
+  onSelect,
+}: {
+  locations: Location[];
+  selectedId: string;
+  photoCounts: Record<string, number>;
+  onSelect: (id: string) => void;
+}) {
+  if (locations.length === 0) return null;
+  return (
+    <nav
+      aria-label="Locations"
+      className="overflow-x-auto pb-2"
+    >
+      <div className="flex gap-3 px-1 pt-2">
+        {locations.map((loc) => {
+          const count = photoCounts[loc.id] ?? 0;
+          const isSelected = loc.id === selectedId;
+          return (
+            <button
+              key={loc.id}
+              type="button"
+              onClick={() => onSelect(loc.id)}
+              className={`group relative flex shrink-0 flex-col items-center gap-2 rounded-2xl border-2 bg-white p-3 transition-all duration-200 ease-out ${
+                isSelected
+                  ? "border-stone-900 shadow-lg ring-4 ring-stone-200"
+                  : "border-stone-200 hover:scale-105 hover:border-stone-400 hover:shadow-md hover:ring-4 hover:ring-blue-100"
+              }`}
+              style={{ minWidth: 116 }}
+              title={`${loc.name} — ${count} photo${count === 1 ? "" : "s"}`}
+            >
+              <div className="flex h-16 w-24 items-center justify-center">
+                {loc.logo_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={loc.logo_url}
+                    alt={loc.name}
+                    className={`h-full w-full object-contain transition-transform duration-200 ease-out ${
+                      isSelected ? "" : "group-hover:scale-110"
+                    }`}
+                    loading="lazy"
+                  />
+                ) : (
+                  <div
+                    className={`flex h-14 w-14 items-center justify-center rounded-full bg-stone-100 text-xl font-bold text-stone-600 transition-transform duration-200 ease-out ${
+                      isSelected ? "" : "group-hover:scale-110"
+                    }`}
+                  >
+                    {loc.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <div
+                className={`text-center text-xs font-semibold leading-tight ${
+                  isSelected ? "text-stone-900" : "text-stone-700"
+                }`}
+                style={{ maxWidth: 110 }}
+              >
+                {loc.name}
+              </div>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-medium tabular-nums ${
+                  isSelected
+                    ? "bg-stone-900 text-white"
+                    : "bg-stone-100 text-stone-600 group-hover:bg-blue-50 group-hover:text-blue-800"
+                }`}
+              >
+                {count} photo{count === 1 ? "" : "s"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
   );
 }

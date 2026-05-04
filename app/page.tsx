@@ -1,10 +1,17 @@
-import { listLocations } from "@/lib/airtable";
+import { listAllPhotos, listLocations } from "@/lib/airtable";
 import { DashboardClient } from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const locations = await listLocations().catch(() => []);
+  const [locations, allPhotos] = await Promise.all([
+    listLocations().catch(() => []),
+    listAllPhotos().catch(() => []),
+  ]);
+  const photoCounts: Record<string, number> = {};
+  for (const p of allPhotos) {
+    photoCounts[p.locationId] = (photoCounts[p.locationId] ?? 0) + 1;
+  }
   return (
     <div className="space-y-6">
       <div>
@@ -16,7 +23,7 @@ export default async function HomePage() {
           5-day mean temperature and relative humidity.
         </p>
       </div>
-      <DashboardClient locations={locations} />
+      <DashboardClient locations={locations} photoCounts={photoCounts} />
     </div>
   );
 }

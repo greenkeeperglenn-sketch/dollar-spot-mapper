@@ -484,6 +484,14 @@ export async function listPhotosForLocation(
   return rows.map(rowToPhoto).filter((p) => p.locationId === locationId);
 }
 
+export async function listAllPhotos(): Promise<PhotoAssessment[]> {
+  const rows = await listAll<PhotoFields>(TABLES.photos, {
+    "sort[0][field]": "photo_date",
+    "sort[0][direction]": "asc",
+  });
+  return rows.map(rowToPhoto);
+}
+
 export async function createPhotoAssessment(input: {
   locationId: string;
   photo_date: string;
