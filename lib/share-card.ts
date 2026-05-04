@@ -467,7 +467,7 @@ function drawChart(ctx: CanvasRenderingContext2D, input: ShareCardInput) {
   ctx.fillText("Photo assessed", lx + 22, legendY);
 }
 
-function drawFooter(ctx: CanvasRenderingContext2D) {
+function drawFooter(ctx: CanvasRenderingContext2D, h = H) {
   ctx.fillStyle = "#a8a29e";
   ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
   ctx.textAlign = "right";
@@ -475,8 +475,301 @@ function drawFooter(ctx: CanvasRenderingContext2D) {
   ctx.fillText(
     "Smith-Kerns logistic-regression model · Dollar Spot Monitor · STRI",
     W - 40,
-    H - 20
+    h - 20
   );
+}
+
+// =====================================================================
+// Phase plot share card
+// =====================================================================
+
+import { smithKerns } from "./smith-kerns";
+
+const PHASE_T_MIN = 5;
+const PHASE_T_MAX = 35;
+const PHASE_T_STEP = 1;
+const PHASE_T_CELLS = (PHASE_T_MAX - PHASE_T_MIN) / PHASE_T_STEP;
+const PHASE_RH_MIN = 40;
+const PHASE_RH_MAX = 100;
+const PHASE_RH_STEP = 5;
+const PHASE_RH_CELLS = (PHASE_RH_MAX - PHASE_RH_MIN) / PHASE_RH_STEP;
+const PHASE_HISTORY_DAYS = 30;
+
+function phaseBandFill(p: number): string {
+  if (p < 0.2) return "#dcfce7";
+  if (p < 0.3) return "#fef3c7";
+  return "#fecaca";
+}
+function pastOpacity(i: number, n: number): number {
+  if (n <= 1) return 1;
+  return 0.15 + 0.85 * (i / (n - 1));
+}
+function futureOpacity(i: number, n: number): number {
+  if (n <= 1) return 1;
+  return 1 - 0.55 * (i / (n - 1));
+}
+
+export type PhaseShareCardInput = {
+  locationName: string;
+  locationLogoUrl?: string | null;
+  scores: PressureScore[];
+  forecast: ForecastPressureRow[];
+  photoCount: number;
+  meanDiseasePct: number | null;
+};
+
+export async function buildPhaseShareCard(
+  input: PhaseShareCardInput
+): Promise<Blob> {
+  const PW = 1200;
+  const PH = 950;
+  const SCALE_LOCAL = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = PW * SCALE_LOCAL;
+  canvas.height = PH * SCALE_LOCAL;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D not available");
+  ctx.scale(SCALE_LOCAL, SCALE_LOCAL);
+  ctx.imageSmoothingEnabled = true;
+
+  const [striLogo, locationLogo] = await Promise.all([
+    loadImage("/stri-logo.png").catch(() => null),
+    input.locationLogoUrl
+      ? loadImage(input.locationLogoUrl).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  // Background
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, PW, PH);
+
+  // Header — share the same drawHeader logic as the line-chart card so the
+  // location/STRI/date sit identically.
+  drawHeader(
+    ctx,
+    {
+      locationName: input.locationName,
+      locationLogoUrl: input.locationLogoUrl ?? null,
+      scores: input.scores,
+      forecast: input.forecast,
+      photoCount: input.photoCount,
+      meanDiseasePct: input.meanDiseasePct,
+      photoDates: [],
+    },
+    striLogo,
+    locationLogo
+  );
+
+  // Stat tiles
+  drawStatTiles(ctx, {
+    locationName: input.locationName,
+    locationLogoUrl: input.locationLogoUrl ?? null,
+    scores: input.scores,
+    forecast: input.forecast,
+    photoCount: input.photoCount,
+    meanDiseasePct: input.meanDiseasePct,
+    photoDates: [],
+  });
+
+  // Phase grid area — slot it under the tiles, leaving room for the footer.
+  const gridLeft = 60;
+  const gridRight = PW - 40;
+  const gridTop = 300;
+  const gridBottom = PH - 70;
+  const innerW = gridRight - gridLeft;
+  const innerH = gridBottom - gridTop;
+  const cellW = innerW / PHASE_T_CELLS;
+  const cellH = innerH / PHASE_RH_CELLS;
+
+  function tToX(t: number): number {
+    const c = Math.max(PHASE_T_MIN, Math.min(PHASE_T_MAX, t));
+    return gridLeft + ((c - PHASE_T_MIN) / (PHASE_T_MAX - PHASE_T_MIN)) * innerW;
+  }
+  function rhToY(rh: number): number {
+    const c = Math.max(PHASE_RH_MIN, Math.min(PHASE_RH_MAX, rh));
+    return (
+      gridTop + ((PHASE_RH_MAX - c) / (PHASE_RH_MAX - PHASE_RH_MIN)) * innerH
+    );
+  }
+
+  // Cells
+  for (let ri = 0; ri < PHASE_RH_CELLS; ri++) {
+    const rhCenter = PHASE_RH_MAX - (ri + 0.5) * PHASE_RH_STEP;
+    for (let ti = 0; ti < PHASE_T_CELLS; ti++) {
+      const tCenter = PHASE_T_MIN + (ti + 0.5) * PHASE_T_STEP;
+      const r = smithKerns(tCenter, rhCenter);
+      const x = gridLeft + ti * cellW;
+      const y = gridTop + ri * cellH;
+      ctx.fillStyle = phaseBandFill(r.probability);
+      ctx.fillRect(x, y, cellW + 0.5, cellH + 0.5);
+      ctx.fillStyle = "rgba(28,25,23,0.55)";
+      ctx.font = "500 11px ui-sans-serif, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        String(Math.round(r.probability * 100)),
+        x + cellW / 2,
+        y + cellH / 2
+      );
+    }
+  }
+
+  // Frame
+  ctx.strokeStyle = "rgba(28,25,23,0.3)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(gridLeft, gridTop, innerW, innerH);
+
+  // Y axis ticks (RH)
+  ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
+  ctx.fillStyle = "#57534e";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (let rh = PHASE_RH_MIN; rh <= PHASE_RH_MAX; rh += 10) {
+    const y = rhToY(rh);
+    ctx.fillText(`${rh}%`, gridLeft - 6, y);
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(28,25,23,0.4)";
+    ctx.moveTo(gridLeft - 4, y);
+    ctx.lineTo(gridLeft, y);
+    ctx.stroke();
+  }
+  // Y label rotated
+  ctx.save();
+  ctx.translate(20, gridTop + innerH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = "#1c1917";
+  ctx.font = "bold 12px ui-sans-serif, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("5-day mean humidity (%)", 0, 0);
+  ctx.restore();
+
+  // X axis ticks (T)
+  ctx.fillStyle = "#57534e";
+  ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  for (let t = PHASE_T_MIN; t <= PHASE_T_MAX; t += 5) {
+    const x = tToX(t);
+    ctx.fillText(`${t}°C`, x, gridBottom + 6);
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(28,25,23,0.4)";
+    ctx.moveTo(x, gridBottom);
+    ctx.lineTo(x, gridBottom + 4);
+    ctx.stroke();
+  }
+  // X label
+  ctx.fillStyle = "#1c1917";
+  ctx.font = "bold 12px ui-sans-serif, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(
+    "5-day mean temperature (°C)",
+    gridLeft + innerW / 2,
+    gridBottom + 30
+  );
+
+  // Trail data
+  const last = input.scores.slice(-PHASE_HISTORY_DAYS);
+  const next = input.forecast;
+  const today = last[last.length - 1];
+
+  // Forecast trail (drawn first so today dot lands on top)
+  const futureChain = today
+    ? [
+        {
+          t: today.temp_5day_avg_c,
+          rh: today.rh_5day_avg_pct,
+        },
+        ...next.map((f) => ({
+          t: f.temp_5day_avg_c,
+          rh: f.rh_5day_avg_pct,
+        })),
+      ]
+    : next.map((f) => ({
+        t: f.temp_5day_avg_c,
+        rh: f.rh_5day_avg_pct,
+      }));
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.setLineDash([8, 5]);
+  for (let i = 0; i < futureChain.length - 1; i++) {
+    const a = futureChain[i];
+    const b = futureChain[i + 1];
+    const opa =
+      (futureOpacity(Math.max(0, i), Math.max(1, next.length)) +
+        futureOpacity(Math.max(0, i), Math.max(1, next.length))) /
+      2;
+    ctx.strokeStyle = `rgba(156,163,175,${opa})`;
+    ctx.beginPath();
+    ctx.moveTo(tToX(a.t), rhToY(a.rh));
+    ctx.lineTo(tToX(b.t), rhToY(b.rh));
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  for (let i = 0; i < next.length; i++) {
+    const f = next[i];
+    const op = futureOpacity(i, next.length);
+    ctx.beginPath();
+    ctx.fillStyle = `rgba(156,163,175,${op})`;
+    ctx.arc(tToX(f.temp_5day_avg_c), rhToY(f.rh_5day_avg_pct), 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#ffffff";
+    ctx.stroke();
+  }
+
+  // Past trail with fading segments
+  ctx.lineWidth = 3;
+  for (let i = 0; i < last.length - 1; i++) {
+    const a = last[i];
+    const b = last[i + 1];
+    const opa =
+      (pastOpacity(i, last.length) + pastOpacity(i + 1, last.length)) / 2;
+    ctx.strokeStyle = `rgba(28,25,23,${opa})`;
+    ctx.beginPath();
+    ctx.moveTo(tToX(a.temp_5day_avg_c), rhToY(a.rh_5day_avg_pct));
+    ctx.lineTo(tToX(b.temp_5day_avg_c), rhToY(b.rh_5day_avg_pct));
+    ctx.stroke();
+  }
+  for (let i = 0; i < last.length; i++) {
+    const s = last[i];
+    const op = pastOpacity(i, last.length);
+    ctx.beginPath();
+    ctx.fillStyle = `rgba(28,25,23,${op})`;
+    ctx.arc(tToX(s.temp_5day_avg_c), rhToY(s.rh_5day_avg_pct), 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = `rgba(255,255,255,${op})`;
+    ctx.stroke();
+  }
+
+  // Today emphasised
+  if (today) {
+    const tx = tToX(today.temp_5day_avg_c);
+    const ty = rhToY(today.rh_5day_avg_pct);
+    ctx.beginPath();
+    ctx.fillStyle = "#1c1917";
+    ctx.arc(tx, ty, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "#ffffff";
+    ctx.stroke();
+    ctx.fillStyle = "#1c1917";
+    ctx.font = "bold 13px ui-sans-serif, system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Today", tx + 16, ty - 10);
+  }
+
+  // Footer at the bottom of the taller phase canvas
+  drawFooter(ctx, PH);
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("toBlob returned null"))),
+      "image/png"
+    );
+  });
 }
 
 function pickPeak(

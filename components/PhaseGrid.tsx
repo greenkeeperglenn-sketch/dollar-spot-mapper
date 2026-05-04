@@ -1,8 +1,10 @@
 "use client";
 
-import type { PressureScore } from "@/lib/airtable";
+import { useState } from "react";
+import type { PhotoAssessment, PressureScore } from "@/lib/airtable";
 import type { ForecastPressureRow } from "@/lib/forecast-pressure";
 import { smithKerns } from "@/lib/smith-kerns";
+import { buildPhaseShareCard, copyOrDownloadBlob } from "@/lib/share-card";
 
 const T_MIN = 5;
 const T_MAX = 35;
@@ -13,6 +15,8 @@ const RH_MIN = 40;
 const RH_MAX = 100;
 const RH_STEP = 5;
 const RH_CELLS = (RH_MAX - RH_MIN) / RH_STEP;
+
+const HISTORY_DAYS = 30;
 
 const W = 720;
 const H = 400;
@@ -40,16 +44,33 @@ function bandFill(p: number): string {
   return "#fecaca"; // red-200
 }
 
+// Past opacity: oldest → most faded, newest (today) → fully solid.
+function pastOpacity(i: number, n: number): number {
+  if (n <= 1) return 1;
+  return 0.15 + 0.85 * (i / (n - 1));
+}
+// Future opacity: nearest → strong, farthest → faded but still readable.
+function futureOpacity(i: number, n: number): number {
+  if (n <= 1) return 1;
+  return 1 - 0.55 * (i / (n - 1));
+}
+
 export function PhaseGrid({
   scores,
   forecast,
+  locationName,
+  locationLogoUrl,
+  photos,
 }: {
   scores: PressureScore[];
   forecast: ForecastPressureRow[];
+  locationName?: string;
+  locationLogoUrl?: string | null;
+  photos?: PhotoAssessment[];
 }) {
-  const last7 = scores.slice(-7);
-  const next7 = forecast.slice(0, 7);
-  const today = last7[last7.length - 1];
+  const last = scores.slice(-HISTORY_DAYS);
+  const next = forecast; // full 14-day forecast
+  const today = last[last.length - 1];
 
   // Pre-compute cell colours + probabilities once at the cell centre.
   const cells: Array<{
@@ -76,59 +97,165 @@ export function PhaseGrid({
     }
   }
 
-  // Trail paths
-  const actualPath = last7
-    .map((s, i) => {
-      const x = tToX(s.temp_5day_avg_c);
-      const y = rhToY(s.rh_5day_avg_pct);
-      return `${i === 0 ? "M" : "L"} ${x} ${y}`;
-    })
-    .join(" ");
-
-  // Bridge: prepend today's actual to the forecast trail so the dashed
-  // line starts where the solid line ended.
-  const forecastChain: Array<{ t: number; rh: number; date: string }> = [];
-  if (today) {
-    forecastChain.push({
-      t: today.temp_5day_avg_c,
-      rh: today.rh_5day_avg_pct,
-      date: today.date,
-    });
-  }
-  for (const f of next7) {
-    forecastChain.push({
-      t: f.temp_5day_avg_c,
-      rh: f.rh_5day_avg_pct,
-      date: f.date,
-    });
-  }
-  const forecastPath = forecastChain
-    .map(
-      (p, i) => `${i === 0 ? "M" : "L"} ${tToX(p.t)} ${rhToY(p.rh)}`
-    )
-    .join(" ");
-
   // X axis ticks: every 5°C
   const tTicks: number[] = [];
   for (let t = T_MIN; t <= T_MAX; t += 5) tTicks.push(t);
-
   // Y axis ticks: every 10%
   const rhTicks: number[] = [];
   for (let rh = RH_MIN; rh <= RH_MAX; rh += 10) rhTicks.push(rh);
 
+  // Trail segments (each with its own fading opacity = average of endpoints)
+  const pastSegments: Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    opacity: number;
+  }> = [];
+  for (let i = 0; i < last.length - 1; i++) {
+    const a = last[i];
+    const b = last[i + 1];
+    const opa =
+      (pastOpacity(i, last.length) + pastOpacity(i + 1, last.length)) / 2;
+    pastSegments.push({
+      x1: tToX(a.temp_5day_avg_c),
+      y1: rhToY(a.rh_5day_avg_pct),
+      x2: tToX(b.temp_5day_avg_c),
+      y2: rhToY(b.rh_5day_avg_pct),
+      opacity: opa,
+    });
+  }
+
+  const futureChain: Array<{
+    t: number;
+    rh: number;
+    date: string;
+    p: number;
+  }> = [];
+  if (today) {
+    futureChain.push({
+      t: today.temp_5day_avg_c,
+      rh: today.rh_5day_avg_pct,
+      date: today.date,
+      p: today.smith_kerns_probability,
+    });
+  }
+  for (const f of next) {
+    futureChain.push({
+      t: f.temp_5day_avg_c,
+      rh: f.rh_5day_avg_pct,
+      date: f.date,
+      p: f.smith_kerns_probability,
+    });
+  }
+  const futureSegments: Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    opacity: number;
+  }> = [];
+  for (let i = 0; i < futureChain.length - 1; i++) {
+    const a = futureChain[i];
+    const b = futureChain[i + 1];
+    // Index 0 in futureChain is today (already drawn as past), so future
+    // opacity index starts effectively at i.
+    const opa =
+      (futureOpacity(Math.max(0, i - 0), Math.max(1, next.length)) +
+        futureOpacity(
+          Math.max(0, i + 1 - 1),
+          Math.max(1, next.length)
+        )) /
+      2;
+    futureSegments.push({
+      x1: tToX(a.t),
+      y1: rhToY(a.rh),
+      x2: tToX(b.t),
+      y2: rhToY(b.rh),
+      opacity: opa,
+    });
+  }
+
+  // Copy-share state
+  const [shareStatus, setShareStatus] = useState<
+    | { kind: "idle" }
+    | { kind: "busy" }
+    | { kind: "ok"; how: "clipboard" | "download" }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+
+  async function handleCopyShare() {
+    if (shareStatus.kind === "busy") return;
+    setShareStatus({ kind: "busy" });
+    try {
+      const photosArr = photos ?? [];
+      const meanDiseasePct =
+        photosArr.length === 0
+          ? null
+          : photosArr.reduce((s, p) => s + p.disease_pct, 0) /
+            photosArr.length;
+      const blob = await buildPhaseShareCard({
+        locationName: locationName ?? "Location",
+        locationLogoUrl: locationLogoUrl ?? null,
+        scores,
+        forecast,
+        photoCount: photosArr.length,
+        meanDiseasePct,
+      });
+      const how = await copyOrDownloadBlob(
+        blob,
+        `${(locationName ?? "location").replace(/\s+/g, "-").toLowerCase()}-phase-${new Date()
+          .toISOString()
+          .slice(0, 10)}.png`
+      );
+      setShareStatus({ kind: "ok", how });
+      setTimeout(() => setShareStatus({ kind: "idle" }), 4000);
+    } catch (e) {
+      setShareStatus({
+        kind: "error",
+        message: e instanceof Error ? e.message : String(e),
+      });
+      setTimeout(() => setShareStatus({ kind: "idle" }), 6000);
+    }
+  }
+
   return (
     <section className="rounded-lg border border-stone-200 bg-white p-4">
-      <header className="mb-3">
-        <h2 className="text-sm font-semibold tracking-tight text-stone-900">
-          Pressure phase plot
-        </h2>
-        <p className="text-xs text-stone-500 leading-relaxed">
-          Smith-Kerns probability for every (5-day mean temperature, 5-day
-          mean humidity) combination — same green / amber / red bands as the
-          main chart. The trail shows where the location has been (solid,
-          last 7 days) and where it&apos;s heading (dashed, next 7 days
-          forecast). The big dot is today.
-        </p>
+      <header className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold tracking-tight text-stone-900">
+            Pressure phase plot
+          </h2>
+          <p className="text-xs text-stone-500 leading-relaxed">
+            Smith-Kerns probability for every (5-day mean temperature, 5-day
+            mean humidity) combination — same green / amber / red bands as the
+            main chart. Solid line is the last {HISTORY_DAYS} days (older
+            stretches faded, today is the big dot). Dashed line is the full
+            forecast — direction the location is heading.
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <button
+            onClick={handleCopyShare}
+            disabled={shareStatus.kind === "busy"}
+            className="rounded border border-stone-300 bg-white px-3 py-1 text-xs font-medium hover:bg-stone-50 disabled:opacity-50"
+            title="Copy this phase plot as an image you can paste into WhatsApp"
+          >
+            {shareStatus.kind === "busy" ? "Building…" : "📋 Copy share image"}
+          </button>
+          {shareStatus.kind === "ok" && (
+            <span className="text-[11px] text-green-700">
+              {shareStatus.how === "clipboard"
+                ? "Copied — paste into WhatsApp."
+                : "Downloaded."}
+            </span>
+          )}
+          {shareStatus.kind === "error" && (
+            <span className="text-[11px] text-red-700">
+              {shareStatus.message}
+            </span>
+          )}
+        </div>
       </header>
       <div className="overflow-x-auto">
         <svg
@@ -253,25 +380,29 @@ export function PhaseGrid({
             5-day mean temperature (°C)
           </text>
 
-          {/* Forecast trail (dashed) — drawn first so the actual line
-              and today dot sit on top */}
-          {forecastPath && (
-            <path
-              d={forecastPath}
-              fill="none"
+          {/* Forecast trail (dashed) — drawn first */}
+          {futureSegments.map((s, i) => (
+            <line
+              key={`fs-${i}`}
+              x1={s.x1}
+              y1={s.y1}
+              x2={s.x2}
+              y2={s.y2}
               stroke="#9ca3af"
               strokeWidth={2.5}
+              strokeOpacity={s.opacity}
               strokeDasharray="6 4"
               strokeLinecap="round"
             />
-          )}
-          {next7.map((f, i) => (
+          ))}
+          {next.map((f, i) => (
             <circle
               key={`fc-${i}`}
               cx={tToX(f.temp_5day_avg_c)}
               cy={rhToY(f.rh_5day_avg_pct)}
               r={3}
               fill="#9ca3af"
+              fillOpacity={futureOpacity(i, next.length)}
               stroke="#ffffff"
               strokeWidth={1.5}
             >
@@ -283,25 +414,31 @@ export function PhaseGrid({
             </circle>
           ))}
 
-          {/* Actual trail (solid) */}
-          {actualPath && (
-            <path
-              d={actualPath}
-              fill="none"
+          {/* Past trail with fading segments */}
+          {pastSegments.map((s, i) => (
+            <line
+              key={`ps-${i}`}
+              x1={s.x1}
+              y1={s.y1}
+              x2={s.x2}
+              y2={s.y2}
               stroke="#1c1917"
               strokeWidth={2.5}
+              strokeOpacity={s.opacity}
               strokeLinecap="round"
             />
-          )}
-          {last7.map((s, i) => (
+          ))}
+          {last.map((s, i) => (
             <circle
               key={`ac-${i}`}
               cx={tToX(s.temp_5day_avg_c)}
               cy={rhToY(s.rh_5day_avg_pct)}
               r={3}
               fill="#1c1917"
+              fillOpacity={pastOpacity(i, last.length)}
               stroke="#ffffff"
               strokeWidth={1.5}
+              strokeOpacity={pastOpacity(i, last.length)}
             >
               <title>
                 {s.date}: {s.temp_5day_avg_c.toFixed(1)}°C,{" "}
@@ -345,14 +482,14 @@ export function PhaseGrid({
             className="inline-block h-0 w-6 border-t-[2.5px] border-stone-900"
             style={{ borderStyle: "solid" }}
           />
-          Last 7 days
+          Last {HISTORY_DAYS} days (older fades)
         </span>
         <span className="inline-flex items-center gap-1">
           <span
             className="inline-block h-0 w-6 border-t-[2.5px]"
             style={{ borderStyle: "dashed", borderColor: "#9ca3af" }}
           />
-          Next 7 days
+          Forecast
         </span>
       </div>
     </section>

@@ -243,7 +243,13 @@ export function DashboardClient({ locations }: { locations: Location[] }) {
             Show more detail (decomposition, raw inputs, photo trends)
           </summary>
           <div className="space-y-6 border-t border-stone-200 p-4">
-            <PhaseGrid scores={scores} forecast={forecast} />
+            <PhaseGrid
+              scores={scores}
+              forecast={forecast}
+              locationName={selectedLocation?.name ?? "Location"}
+              locationLogoUrl={selectedLocation?.logo_url ?? null}
+              photos={photos ?? []}
+            />
             <PressurePanels
               scores={scores}
               forecast={forecast}
