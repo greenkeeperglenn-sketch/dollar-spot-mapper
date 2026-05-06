@@ -18,8 +18,8 @@ const COLOURS: Record<CornerKey, string> = {
   bl: "#f59e0b",
 };
 
-const MAGNIFIER_RADIUS = 60;
-const MAGNIFIER_ZOOM = 4;
+const MAGNIFIER_RADIUS = 90;
+const MAGNIFIER_ZOOM = 5;
 
 export function PinCanvas({
   img,
@@ -117,6 +117,16 @@ export function PinCanvas({
         ref={containerRef}
         className="relative max-h-[70vh] overflow-auto rounded border border-stone-200 bg-stone-900"
       >
+        {/* Magnifier — fixed to the viewport so it stays on screen while
+            the user scrolls or zooms inside the container. */}
+        {hover && (
+          <Magnifier
+            img={img}
+            point={hover}
+            radius={MAGNIFIER_RADIUS}
+            zoom={MAGNIFIER_ZOOM}
+          />
+        )}
         <div
           className="relative inline-block select-none"
           style={{ width: `${zoom * 100}%` }}
@@ -175,16 +185,6 @@ export function PinCanvas({
             </svg>
           )}
         </div>
-
-        {/* Magnifier — fixed corner overlay, shows pixels under the cursor */}
-        {hover && (
-          <Magnifier
-            img={img}
-            point={hover}
-            radius={MAGNIFIER_RADIUS}
-            zoom={MAGNIFIER_ZOOM}
-          />
-        )}
       </div>
 
       <div className="flex flex-wrap gap-2 text-xs">
@@ -254,10 +254,18 @@ function Magnifier({
   }, [img, point, radius, zoom]);
 
   return (
-    <canvas
-      ref={ref}
-      className="pointer-events-none absolute right-3 top-3 rounded-full border-2 border-white shadow-lg"
-      style={{ width: radius * 2, height: radius * 2 }}
-    />
+    <div
+      className="pointer-events-none fixed right-4 top-24 z-50 flex flex-col items-center"
+      style={{ width: radius * 2 }}
+    >
+      <canvas
+        ref={ref}
+        className="rounded-full border-4 border-white shadow-2xl ring-1 ring-stone-300"
+        style={{ width: radius * 2, height: radius * 2 }}
+      />
+      <span className="mt-1 rounded-full bg-stone-900/80 px-2 py-0.5 text-[10px] font-semibold text-white">
+        {zoom}× magnifier
+      </span>
+    </div>
   );
 }

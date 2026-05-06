@@ -32,8 +32,11 @@ export type PriorMeta = {
 type Tool = "mark" | "brush" | "erase";
 
 const DEFAULT_NEW_RADIUS = 18;
-const BRUSH_RADIUS = 10;
-const BRUSH_MIN_DISTANCE = 14; // mm between dots while brushing
+const BRUSH_RADIUS = 18;
+const BRUSH_MIN_DISTANCE = 26; // mm between dots while brushing
+const MAX_FOCUS_RADIUS = 300; // mm — quarter-image area is ~282mm radius
+const MAGNIFIER_RADIUS = 90;
+const MAGNIFIER_ZOOM = 5;
 
 export function AssessEditor({
   jpegBase64,
@@ -81,6 +84,18 @@ export function AssessEditor({
     lastX: number;
     lastY: number;
   } | null>(null);
+  const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
+  // Image element for magnifier rendering (loaded once from the base64).
+  const sourceImgRef = useRef<HTMLImageElement | null>(null);
+  const [sourceImgReady, setSourceImgReady] = useState(false);
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      sourceImgRef.current = img;
+      setSourceImgReady(true);
+    };
+    img.src = `data:image/jpeg;base64,${jpegBase64}`;
+  }, [jpegBase64]);
 
   const editedCount = foci.length;
   const editedPct = useMemo(() => diseasePercentFromFoci(foci), [foci]);
@@ -173,6 +188,7 @@ export function AssessEditor({
   function handlePointerMove(e: React.PointerEvent) {
     const coords = svgToCoords(e);
     if (!coords) return;
+    setHover(coords);
 
     if (tool === "brush" && brushing) {
       const dx = coords.x - brushing.lastX;
@@ -390,8 +406,20 @@ export function AssessEditor({
             <span>
               <strong>Last visit ({priorMeta.date}):</strong>{" "}
               {priorMeta.foci_count} foci · {priorMeta.disease_pct.toFixed(1)}%
-              coverage
+              coverage. Pre-filled below — adjust as you see now.
             </span>
+            <button
+              type="button"
+              onClick={() => {
+                setFoci([]);
+                setSelectedId(null);
+                setScaleAll(1);
+                setScaleAllBase(null);
+              }}
+              className="rounded border border-blue-300 bg-white px-2 py-0.5 text-[11px] font-medium text-blue-900 hover:bg-blue-100"
+            >
+              Start blank instead
+            </button>
             <label className="ml-auto inline-flex items-center gap-1">
               <input
                 type="checkbox"
@@ -423,6 +451,7 @@ export function AssessEditor({
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
+            onPointerLeave={() => setHover(null)}
             style={{
               cursor:
                 tool === "erase"
@@ -590,7 +619,7 @@ export function AssessEditor({
                 <input
                   type="range"
                   min={3}
-                  max={150}
+                  max={MAX_FOCUS_RADIUS}
                   step={1}
                   value={selectedFocus.radius_px}
                   onChange={(e) =>
@@ -601,7 +630,7 @@ export function AssessEditor({
                 <div className="flex justify-between font-mono text-[11px] text-stone-500">
                   <span>3</span>
                   <span>{selectedFocus.radius_px}</span>
-                  <span>150</span>
+                  <span>{MAX_FOCUS_RADIUS}</span>
                 </div>
               </label>
               <button
@@ -773,6 +802,143 @@ export function AssessEditor({
           </div>
         </div>
       </aside>
+
+      {/* Fixed magnifier — anchored to the viewport so it stays visible
+          while the user scrolls. Hidden when the cursor isn't over the
+          image. */}
+      {hover && sourceImgReady && sourceImgRef.current && (
+        <FociMagnifier
+          img={sourceImgRef.current}
+          point={hover}
+          radius={MAGNIFIER_RADIUS}
+          zoom={MAGNIFIER_ZOOM}
+          foci={previewFoci}
+          priorFoci={showPriorGhost ? (priorFoci ?? null) : null}
+          aiSuggestions={aiSuggestions}
+        />
+      )}
+    </div>
+  );
+}
+
+function FociMagnifier({
+  img,
+  point,
+  radius,
+  zoom,
+  foci,
+  priorFoci,
+  aiSuggestions,
+}: {
+  img: HTMLImageElement;
+  point: { x: number; y: number };
+  radius: number;
+  zoom: number;
+  foci: Focus[];
+  priorFoci: Focus[] | null;
+  aiSuggestions: Focus[];
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const rawCtx = c.getContext("2d");
+    if (!rawCtx) return;
+    const ctx: CanvasRenderingContext2D = rawCtx;
+    const size = radius * 2;
+    c.width = size;
+    c.height = size;
+    const sourceSize = size / zoom;
+    ctx.imageSmoothingEnabled = true;
+    ctx.clearRect(0, 0, size, size);
+
+    // Draw the image patch under the cursor.
+    ctx.drawImage(
+      img,
+      point.x - sourceSize / 2,
+      point.y - sourceSize / 2,
+      sourceSize,
+      sourceSize,
+      0,
+      0,
+      size,
+      size
+    );
+
+    // Helper: draw a focus circle relative to the cursor at zoom level.
+    function drawCircle(
+      f: Focus,
+      fill: string,
+      stroke: string,
+      lineWidth: number,
+      dash?: number[]
+    ) {
+      const dx = (f.x - point.x) * zoom;
+      const dy = (f.y - point.y) * zoom;
+      const r = f.radius_px * zoom;
+      const cx = size / 2 + dx;
+      const cy = size / 2 + dy;
+      // Skip if entirely outside the magnifier.
+      if (cx + r < 0 || cy + r < 0 || cx - r > size || cy - r > size) return;
+      ctx.beginPath();
+      if (dash) ctx.setLineDash(dash);
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = lineWidth;
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      if (fill !== "transparent") ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    if (priorFoci) {
+      for (const f of priorFoci) {
+        drawCircle(f, "transparent", "rgba(99,102,241,0.7)", 1.5, [6, 4]);
+      }
+    }
+    for (const f of foci) {
+      drawCircle(
+        f,
+        "rgba(220,38,38,0.32)",
+        "rgba(220,38,38,0.95)",
+        2.5
+      );
+    }
+    for (const s of aiSuggestions) {
+      drawCircle(
+        s,
+        "rgba(249,115,22,0.18)",
+        "rgba(249,115,22,0.95)",
+        2,
+        [4, 3]
+      );
+    }
+
+    // Crosshair
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(size / 2, 0);
+    ctx.lineTo(size / 2, size);
+    ctx.moveTo(0, size / 2);
+    ctx.lineTo(size, size / 2);
+    ctx.stroke();
+  }, [img, point, radius, zoom, foci, priorFoci, aiSuggestions]);
+
+  return (
+    <div
+      className="pointer-events-none fixed right-4 top-24 z-50 flex flex-col items-center"
+      style={{ width: radius * 2 }}
+    >
+      <canvas
+        ref={ref}
+        className="rounded-full border-4 border-white shadow-2xl ring-1 ring-stone-300"
+        style={{ width: radius * 2, height: radius * 2 }}
+      />
+      <span className="mt-1 rounded-full bg-stone-900/80 px-2 py-0.5 text-[10px] font-semibold text-white">
+        {zoom}× magnifier
+      </span>
     </div>
   );
 }
