@@ -4,12 +4,19 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Location, PhotoAssessment, PressureScore } from "@/lib/airtable";
 import type { ForecastPressureRow } from "@/lib/forecast-pressure";
+import type { RiskBand } from "@/lib/smith-kerns";
+import { bandPalette, neutralPalette } from "@/lib/risk-palette";
 import { HeroSummary, type Range } from "@/components/HeroSummary";
 import { PhaseGrid } from "@/components/PhaseGrid";
-import { PhotoStrip } from "@/components/PhotoStrip";
+import { PhotoStrip, compareSites } from "@/components/PhotoStrip";
 import { PhotoTrendPanels } from "@/components/PhotoTrendPanels";
 import { PressurePanels } from "@/components/PressurePanels";
 import { StoredAssessmentReview } from "@/components/StoredAssessmentReview";
+
+export type LocationStat = {
+  today: { date: string; probability: number; band: RiskBand } | null;
+  peak14: { date: string; probability: number; band: RiskBand } | null;
+};
 
 async function readError(res: Response): Promise<string> {
   const text = await res.text();
@@ -43,9 +50,13 @@ function rangeToDays(range: Range): number {
 export function DashboardClient({
   locations,
   photoCounts = {},
+  lastPhotoDate = {},
+  locationStats = {},
 }: {
   locations: Location[];
   photoCounts?: Record<string, number>;
+  lastPhotoDate?: Record<string, string>;
+  locationStats?: Record<string, LocationStat>;
 }) {
   const active = useMemo(() => {
     const list = locations.filter((l) => l.active);
@@ -90,9 +101,15 @@ export function DashboardClient({
     return m;
   }, [photosByDate]);
 
-  const viewingPhotos = viewingDate
-    ? photosByDate.get(viewingDate) ?? []
-    : [];
+  const selectedLocation = active.find((l) => l.id === selectedId);
+  const siteOrder = selectedLocation?.sites ?? [];
+
+  const viewingPhotos = useMemo(() => {
+    const list = viewingDate ? photosByDate.get(viewingDate) ?? [] : [];
+    return [...list].sort((a, b) =>
+      compareSites(a.quadrat_label, b.quadrat_label, siteOrder)
+    );
+  }, [viewingDate, photosByDate, siteOrder]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -160,14 +177,14 @@ export function DashboardClient({
     );
   }
 
-  const selectedLocation = active.find((l) => l.id === selectedId);
-
   return (
     <div className="space-y-6">
       <LocationStrip
         locations={active}
         selectedId={selectedId}
         photoCounts={photoCounts}
+        lastPhotoDate={lastPhotoDate}
+        locationStats={locationStats}
         onSelect={setSelectedId}
       />
       <div className="flex flex-wrap items-center gap-3">
@@ -220,6 +237,8 @@ export function DashboardClient({
       {photos && (
         <PhotoStrip
           photos={photos}
+          scores={scores ?? []}
+          siteOrder={siteOrder}
           onSelect={(d) =>
             setViewingDate((prev) => (prev === d ? null : d))
           }
@@ -292,11 +311,15 @@ function LocationStrip({
   locations,
   selectedId,
   photoCounts,
+  lastPhotoDate,
+  locationStats,
   onSelect,
 }: {
   locations: Location[];
   selectedId: string;
   photoCounts: Record<string, number>;
+  lastPhotoDate: Record<string, string>;
+  locationStats: Record<string, LocationStat>;
   onSelect: (id: string) => void;
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -338,6 +361,9 @@ function LocationStrip({
         <div className="mx-auto flex w-max gap-3 px-10 pt-2">
           {locations.map((loc) => {
             const count = photoCounts[loc.id] ?? 0;
+            const stat = locationStats[loc.id];
+            const last = lastPhotoDate[loc.id] ?? null;
+            const daysSince = last ? daysBetween(last, todayIsoUTC()) : null;
             const isSelected = loc.id === selectedId;
             return (
               <button
@@ -349,8 +375,16 @@ function LocationStrip({
                     ? "border-stone-900 shadow-lg ring-4 ring-stone-200"
                     : "border-stone-200 hover:scale-105 hover:border-stone-400 hover:shadow-md hover:ring-4 hover:ring-blue-100"
                 }`}
-                style={{ minWidth: 116 }}
-                title={`${loc.name} — ${count} photo${count === 1 ? "" : "s"}`}
+                style={{ minWidth: 144 }}
+                title={`${loc.name} — ${count} photo${count === 1 ? "" : "s"}${
+                  stat?.today
+                    ? ` · latest ${pct(stat.today.probability)} (${stat.today.band})`
+                    : ""
+                }${
+                  stat?.peak14
+                    ? ` · 14d peak ${pct(stat.peak14.probability)} (${stat.peak14.band})`
+                    : ""
+                }`}
               >
                 <div className="flex h-16 w-24 items-center justify-center">
                   {loc.logo_url ? (
@@ -374,22 +408,27 @@ function LocationStrip({
                   )}
                 </div>
                 <div
-                  className={`text-center text-xs font-semibold leading-tight ${
+                  className={`flex h-8 w-full items-start justify-center overflow-hidden px-1 text-center text-xs font-semibold leading-tight ${
                     isSelected ? "text-stone-900" : "text-stone-700"
                   }`}
-                  style={{ maxWidth: 110 }}
                 >
-                  {loc.name}
+                  <span className="line-clamp-2">{loc.name}</span>
                 </div>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium tabular-nums ${
-                    isSelected
-                      ? "bg-stone-900 text-white"
-                      : "bg-stone-100 text-stone-600 group-hover:bg-blue-50 group-hover:text-blue-800"
-                  }`}
-                >
-                  {count} photo{count === 1 ? "" : "s"}
-                </span>
+                <div className="flex w-full items-stretch gap-1">
+                  <PressurePill
+                    label="Latest"
+                    value={stat?.today?.probability ?? null}
+                    band={stat?.today?.band ?? null}
+                    date={stat?.today?.date ?? null}
+                  />
+                  <PressurePill
+                    label="14d high"
+                    value={stat?.peak14?.probability ?? null}
+                    band={stat?.peak14?.band ?? null}
+                    date={stat?.peak14?.date ?? null}
+                  />
+                </div>
+                <FreshnessPill daysSince={daysSince} count={count} />
               </button>
             );
           })}
@@ -431,4 +470,111 @@ function ScrollButton({
       {isLeft ? "‹" : "›"}
     </button>
   );
+}
+
+function PressurePill({
+  label,
+  value,
+  band,
+  date,
+}: {
+  label: string;
+  value: number | null;
+  band: RiskBand | null;
+  date: string | null;
+}) {
+  const palette = value != null && band ? bandPalette(band) : neutralPalette();
+  return (
+    <div
+      className="flex flex-1 flex-col items-center rounded-md border px-1 py-1 leading-tight"
+      style={{
+        background: palette.bg,
+        borderColor: palette.border,
+        color: palette.fg,
+      }}
+    >
+      <span className="whitespace-nowrap text-[9px] font-semibold uppercase tracking-wide opacity-80">
+        {label}
+      </span>
+      <span className="text-sm font-bold tabular-nums">
+        {value != null ? pct(value) : "—"}
+      </span>
+      <span className="whitespace-nowrap text-[9px] tabular-nums opacity-70">
+        {date ? fmtShortDate(date) : "—"}
+      </span>
+    </div>
+  );
+}
+
+function FreshnessPill({
+  daysSince,
+  count,
+}: {
+  daysSince: number | null;
+  count: number;
+}) {
+  let palette = neutralPalette();
+  let text: string;
+  if (daysSince == null) {
+    text = "no photos";
+  } else if (daysSince <= 0) {
+    text = "today";
+    palette = bandPalette("Low");
+  } else if (daysSince === 1) {
+    text = "1 day ago";
+    palette = bandPalette("Low");
+  } else if (daysSince <= 6) {
+    text = `${daysSince} days ago`;
+    palette = bandPalette("Low");
+  } else if (daysSince <= 13) {
+    text = `${daysSince} days ago`;
+    palette = bandPalette("Moderate");
+  } else {
+    text = `${daysSince} days ago`;
+    palette = bandPalette("High");
+  }
+  return (
+    <div
+      className="flex w-full flex-col items-center rounded-md border px-1 py-0.5 leading-tight"
+      style={{
+        background: palette.bg,
+        borderColor: palette.border,
+        color: palette.fg,
+      }}
+      title={
+        daysSince == null
+          ? "No photos yet"
+          : `Last photo ${daysSince} day${daysSince === 1 ? "" : "s"} ago · target every 7 days`
+      }
+    >
+      <span className="whitespace-nowrap text-[10px] font-bold tabular-nums">
+        {text}
+      </span>
+      <span className="text-[9px] tabular-nums opacity-70">
+        {count} photo{count === 1 ? "" : "s"}
+      </span>
+    </div>
+  );
+}
+
+function fmtShortDate(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+}
+
+function todayIsoUTC(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function daysBetween(fromIso: string, toIso: string): number {
+  const from = Date.parse(`${fromIso}T00:00:00Z`);
+  const to = Date.parse(`${toIso}T00:00:00Z`);
+  return Math.round((to - from) / 86_400_000);
+}
+
+function pct(p: number): string {
+  return `${Math.round(p * 100)}%`;
 }

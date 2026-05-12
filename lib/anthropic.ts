@@ -50,13 +50,8 @@ export function buildPrompt(sensitivity: number): BuiltPrompt {
   };
 }
 
-export type Focus = {
-  id: number;
-  x: number;
-  y: number;
-  radius_px: number;
-  confidence?: "low" | "medium" | "high";
-};
+import type { Focus } from "./focus";
+export type { Focus };
 
 export type AnalysisResult = {
   foci_count: number;
