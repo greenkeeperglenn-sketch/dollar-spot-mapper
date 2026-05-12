@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Location, PhotoAssessment, PressureScore } from "@/lib/airtable";
 import type { ForecastPressureRow } from "@/lib/forecast-pressure";
@@ -52,11 +53,13 @@ export function DashboardClient({
   photoCounts = {},
   lastPhotoDate = {},
   locationStats = {},
+  snapshotGeneratedAt = null,
 }: {
   locations: Location[];
   photoCounts?: Record<string, number>;
   lastPhotoDate?: Record<string, string>;
   locationStats?: Record<string, LocationStat>;
+  snapshotGeneratedAt?: string | null;
 }) {
   const active = useMemo(() => {
     const list = locations.filter((l) => l.active);
@@ -179,6 +182,7 @@ export function DashboardClient({
 
   return (
     <div className="space-y-6">
+      <SnapshotBar generatedAtIso={snapshotGeneratedAt} />
       <LocationStrip
         locations={active}
         selectedId={selectedId}
@@ -577,4 +581,100 @@ function daysBetween(fromIso: string, toIso: string): number {
 
 function pct(p: number): string {
   return `${Math.round(p * 100)}%`;
+}
+
+function SnapshotBar({ generatedAtIso }: { generatedAtIso: string | null }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{
+    kind: "ok" | "error";
+    text: string;
+  } | null>(null);
+
+  async function refresh() {
+    if (busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/snapshot/refresh", { method: "POST" });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        generated_at_iso?: string;
+      };
+      if (!res.ok) {
+        setMessage({
+          kind: "error",
+          text: data.error ?? `HTTP ${res.status}`,
+        });
+      } else {
+        setMessage({
+          kind: "ok",
+          text: "Weather refreshed. Reloading…",
+        });
+        // Trigger a server-component re-render so the dashboard reads
+        // the fresh snapshot.
+        router.refresh();
+      }
+    } catch (e) {
+      setMessage({
+        kind: "error",
+        text: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setBusy(false);
+      setTimeout(() => setMessage(null), 5000);
+    }
+  }
+
+  const ageMinutes = generatedAtIso
+    ? Math.max(
+        0,
+        Math.round((Date.now() - Date.parse(generatedAtIso)) / 60_000)
+      )
+    : null;
+
+  let ageLabel: string;
+  if (generatedAtIso == null) {
+    ageLabel = "no weather snapshot yet — click Refresh to build one";
+  } else if (ageMinutes == null) {
+    ageLabel = "weather snapshot unknown";
+  } else if (ageMinutes < 1) {
+    ageLabel = "weather snapshot just now";
+  } else if (ageMinutes < 60) {
+    ageLabel = `weather snapshot ${ageMinutes} min ago`;
+  } else if (ageMinutes < 60 * 24) {
+    const hrs = Math.round(ageMinutes / 60);
+    ageLabel = `weather snapshot ${hrs}h ago`;
+  } else {
+    const days = Math.round(ageMinutes / (60 * 24));
+    ageLabel = `weather snapshot ${days} day${days === 1 ? "" : "s"} ago`;
+  }
+
+  const stale = ageMinutes != null && ageMinutes > 60 * 26; // >26h
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-xs text-stone-600">
+      <span
+        className={stale ? "font-semibold text-amber-700" : undefined}
+      >
+        {ageLabel}
+      </span>
+      <button
+        onClick={refresh}
+        disabled={busy}
+        className="rounded border border-stone-300 bg-white px-2 py-0.5 text-[11px] font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+      >
+        {busy ? "Refreshing…" : "Refresh now"}
+      </button>
+      {message && (
+        <span
+          className={
+            message.kind === "ok" ? "text-green-700" : "text-red-700"
+          }
+        >
+          {message.text}
+        </span>
+      )}
+    </div>
+  );
 }

@@ -1,5 +1,5 @@
 {
   "crons": [
-    { "path": "/api/cron/daily-weather", "schedule": "0 6 * * *" }
+    { "path": "/api/cron/daily-weather", "schedule": "0 4 * * *" }
   ]
 }

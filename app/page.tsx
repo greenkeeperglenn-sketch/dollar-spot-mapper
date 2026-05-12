@@ -10,15 +10,17 @@ import {
   computeForecastPressure,
   type ForecastPressureRow,
 } from "@/lib/forecast-pressure";
+import { pickPeak14, readSnapshot } from "@/lib/pressure-snapshot";
 import type { RiskBand } from "@/lib/smith-kerns";
 import { DashboardClient, type LocationStat } from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
 
-async function statForLocation(loc: Location): Promise<LocationStat | null> {
-  // Pull the last few days of actual scores so we always pick the most
-  // recent one even if today's catch-up hasn't run yet, plus the 14-day
-  // forecast peak.
+async function statForLocationLive(
+  loc: Location
+): Promise<LocationStat | null> {
+  // Fallback path used only when the daily snapshot blob hasn't been
+  // written yet (e.g. fresh deploy before the first cron run).
   const since = addDays(todayUTC(), -7);
   const [actuals, forecast] = await Promise.all([
     listPressureForLocation(loc.id, { sinceDate: since }).catch(
@@ -27,25 +29,22 @@ async function statForLocation(loc: Location): Promise<LocationStat | null> {
     computeForecastPressure(loc, 14).catch(() => [] as ForecastPressureRow[]),
   ]);
   const latest = actuals[actuals.length - 1] ?? null;
-  let peak: { date: string; probability: number; band: RiskBand } | null = null;
-  for (const row of forecast) {
-    if (!peak || row.smith_kerns_probability > peak.probability) {
-      peak = {
-        date: row.date,
-        probability: row.smith_kerns_probability,
-        band: row.risk_band,
-      };
-    }
-  }
+  const peak = pickPeak14(forecast);
   return {
     today: latest
       ? {
           date: latest.date,
           probability: latest.smith_kerns_probability,
-          band: latest.risk_band,
+          band: latest.risk_band as RiskBand,
         }
       : null,
-    peak14: peak,
+    peak14: peak
+      ? {
+          date: peak.date,
+          probability: peak.probability,
+          band: peak.risk_band,
+        }
+      : null,
   };
 }
 
@@ -70,26 +69,73 @@ export default async function HomePage() {
     if (!prev || p.photo_date > prev) lastPhotoDate[p.locationId] = p.photo_date;
   }
 
+  // Read the daily snapshot — covers every active location with one
+  // small fetch from Vercel Blob (cached for 60s by Next's data cache).
+  // The cron writes this blob at 04:00 UTC every day; the dashboard never
+  // calls Open-Meteo from this page.
+  const snapshot = await readSnapshot();
+
   const active = locations.filter((l) => l.active);
-  const stats = await Promise.all(
-    active.map((l) => statForLocation(l).catch(() => null))
-  );
   const locationStats: Record<string, LocationStat> = {};
-  active.forEach((l, i) => {
-    const s = stats[i];
-    if (s) locationStats[l.id] = s;
-  });
+  const missingFromSnapshot: Location[] = [];
+  for (const loc of active) {
+    const s = snapshot?.locations[loc.id];
+    if (s) {
+      locationStats[loc.id] = {
+        today: s.today_score
+          ? {
+              date: s.today_score.date,
+              probability: s.today_score.smith_kerns_probability,
+              band: s.today_score.risk_band as RiskBand,
+            }
+          : null,
+        peak14: s.peak14
+          ? {
+              date: s.peak14.date,
+              probability: s.peak14.probability,
+              band: s.peak14.risk_band,
+            }
+          : null,
+      };
+    } else {
+      missingFromSnapshot.push(loc);
+    }
+  }
+  // For any location not covered by the snapshot (brand new locations or
+  // first deploy), fall back to live computation just for that one. Once
+  // the next cron run completes, this branch is skipped.
+  if (missingFromSnapshot.length > 0) {
+    const fallback = await Promise.all(
+      missingFromSnapshot.map((l) =>
+        statForLocationLive(l).catch(() => null)
+      )
+    );
+    missingFromSnapshot.forEach((l, i) => {
+      const s = fallback[i];
+      if (s) locationStats[l.id] = s;
+    });
+  }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Dollar spot pressure
-        </h1>
-        <p className="mt-1 text-sm text-stone-600">
-          Smith-Kerns logistic-regression probability based on the trailing
-          5-day mean temperature and relative humidity.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Dollar spot pressure
+          </h1>
+          <p className="mt-1 text-sm text-stone-600">
+            Smith-Kerns logistic-regression probability based on the trailing
+            5-day mean temperature and relative humidity.
+          </p>
+        </div>
+        {snapshot && (
+          <div className="text-xs text-stone-500">
+            Weather snapshot updated{" "}
+            <strong className="text-stone-700">
+              {fmtSnapshotTime(snapshot.generated_at_iso)}
+            </strong>
+          </div>
+        )}
       </div>
       {loadError && (
         <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
@@ -108,7 +154,29 @@ export default async function HomePage() {
         photoCounts={photoCounts}
         lastPhotoDate={lastPhotoDate}
         locationStats={locationStats}
+        snapshotGeneratedAt={snapshot?.generated_at_iso ?? null}
       />
     </div>
   );
+}
+
+function fmtSnapshotTime(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const sameDay =
+    d.getUTCFullYear() === today.getUTCFullYear() &&
+    d.getUTCMonth() === today.getUTCMonth() &&
+    d.getUTCDate() === today.getUTCDate();
+  if (sameDay) {
+    return `today at ${d.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })}`;
+  }
+  return d.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

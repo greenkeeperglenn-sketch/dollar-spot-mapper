@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { getLocation, listPressureForLocation } from "@/lib/airtable";
 import { jsonRoute } from "@/lib/api-helpers";
 import { addDays, todayUTC, yesterdayUTC } from "@/lib/dates";
-import { computeForecastPressure } from "@/lib/forecast-pressure";
+import {
+  computeForecastPressure,
+  type ForecastPressureRow,
+} from "@/lib/forecast-pressure";
+import { readSnapshot } from "@/lib/pressure-snapshot";
 import { ingestWeather } from "@/lib/weather-pipeline";
 
 export const runtime = "nodejs";
@@ -16,10 +20,7 @@ const MAX_FORECAST_DAYS = 16;
 const MAX_AUTO_CATCH_UP_DAYS = 30;
 // Don't run catch-up more than once per location per CATCH_UP_TTL_MS. The
 // daily cron writes yesterday's reading, and rapid dashboard reloads /
-// range-switches otherwise re-hit Open-Meteo + Airtable for nothing. This
-// is in-memory per process — survives across requests on warm serverless
-// instances and resets on cold start (which is fine, that just means one
-// extra real catch-up per cold-start).
+// range-switches otherwise re-hit Open-Meteo + Airtable for nothing.
 const CATCH_UP_TTL_MS = 30 * 60 * 1000;
 const recentlyCaughtUp = new Map<string, number>();
 
@@ -45,10 +46,9 @@ export async function GET(req: Request) {
       });
 
       // --- Self-healing catch-up --------------------------------------
-      // If the latest pressure row is older than yesterday, fetch the gap
-      // from Open-Meteo and recompute Smith-Kerns for those days *before*
-      // returning. This means the user always sees current data when they
-      // visit, without waiting on the daily cron.
+      // The daily cron should have written yesterday's row; this only
+      // fires if (a) the cron missed and (b) we haven't already tried
+      // to catch up for this location in the last 30 minutes.
       const yesterday = yesterdayUTC();
       const latestStored = actuals[actuals.length - 1]?.date;
       let caughtUpDays = 0;
@@ -74,7 +74,6 @@ export async function GET(req: Request) {
             });
             caughtUpDays = summary.pressureRowsWritten;
             recentlyCaughtUp.set(locationId, Date.now());
-            // Re-read so the response reflects the new rows.
             actuals = await listPressureForLocation(locationId, {
               sinceDate: since,
             });
@@ -85,10 +84,34 @@ export async function GET(req: Request) {
         }
       }
 
-      const forecast =
-        loc && forecastDays > 0
-          ? await computeForecastPressure(loc, forecastDays).catch(() => [])
-          : [];
+      // --- Forecast ---------------------------------------------------
+      // Prefer the daily snapshot — it's a single cached blob, no
+      // Open-Meteo call from this route. Fall back to live computation
+      // only if the snapshot is missing this location (fresh deploy or
+      // brand-new location).
+      let forecast: ForecastPressureRow[] = [];
+      let snapshotGeneratedAt: string | null = null;
+      if (forecastDays > 0) {
+        try {
+          const snapshot = await readSnapshot();
+          snapshotGeneratedAt = snapshot?.generated_at_iso ?? null;
+          const locSnap = snapshot?.locations[locationId];
+          if (locSnap) {
+            forecast = locSnap.forecast.slice(0, forecastDays);
+          } else if (loc) {
+            forecast = await computeForecastPressure(loc, forecastDays).catch(
+              () => []
+            );
+          }
+        } catch (e) {
+          console.warn(`forecast snapshot read failed`, e);
+          if (loc) {
+            forecast = await computeForecastPressure(loc, forecastDays).catch(
+              () => []
+            );
+          }
+        }
+      }
 
       return {
         scores: actuals.map((s) => ({ ...s, is_forecast: false as const })),
@@ -100,6 +123,7 @@ export async function GET(req: Request) {
         caught_up_days: caughtUpDays,
         catch_up_error: catchUpError,
         synced_at_iso: new Date().toISOString(),
+        snapshot_generated_at: snapshotGeneratedAt,
       };
     },
     { context: `GET /api/pressure?locationId=${locationId}` }
