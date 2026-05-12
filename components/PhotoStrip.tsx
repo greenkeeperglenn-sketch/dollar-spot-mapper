@@ -212,10 +212,17 @@ function GalleryCard({
   }, [photo.audit_json_url]);
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className={`group flex shrink-0 flex-col items-stretch gap-1 rounded-lg border-2 bg-white p-1.5 transition-colors ${
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={`group flex shrink-0 cursor-pointer flex-col items-stretch gap-1 rounded-lg border-2 bg-white p-1.5 transition-colors ${
         selected
           ? "border-blue-500 ring-2 ring-blue-200"
           : "border-stone-200 hover:border-stone-400"
@@ -242,7 +249,7 @@ function GalleryCard({
           {photo.disease_pct.toFixed(1)}% · {photo.foci_count} foci
         </span>
       </div>
-    </button>
+    </div>
   );
 }
 
