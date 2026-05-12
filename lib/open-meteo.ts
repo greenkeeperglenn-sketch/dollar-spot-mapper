@@ -32,7 +32,9 @@ export async function fetchDailyRange(input: {
   );
   url.searchParams.set("timezone", "auto");
 
-  const res = await fetch(url, { cache: "no-store" });
+  // Archive data only updates once a day. Cache aggressively to avoid
+  // hammering the free public API.
+  const res = await fetch(url, { next: { revalidate: 3600 } });
   if (!res.ok) {
     throw new Error(`Open-Meteo ${res.status}: ${await res.text()}`);
   }
@@ -59,7 +61,11 @@ export async function fetchForecast(input: {
   );
   url.searchParams.set("timezone", "auto");
 
-  const res = await fetch(url, { cache: "no-store" });
+  // Forecasts update every few hours from Open-Meteo; 30 min is a safe
+  // freshness/cost trade-off and keeps the same dashboard load from
+  // hitting the API again for each location during a single render or a
+  // rapid range-change.
+  const res = await fetch(url, { next: { revalidate: 1800 } });
   if (!res.ok) {
     throw new Error(`Open-Meteo forecast ${res.status}: ${await res.text()}`);
   }

@@ -55,7 +55,7 @@ export function AssessEditor({
     notes?: string;
     aiSnapshot: AiResponse | null;
     priorMeta: PriorMeta | null;
-  }) => void;
+  }) => void | Promise<void>;
   onBack: () => void;
 }) {
   const [tool, setTool] = useState<Tool>("mark");
@@ -65,6 +65,7 @@ export function AssessEditor({
   const [scaleAll, setScaleAll] = useState(1);
   const [scaleAllBase, setScaleAllBase] = useState<Focus[] | null>(null);
   const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // AI helper state
   const [aiSensitivity, setAiSensitivity] = useState(3);
@@ -381,13 +382,24 @@ export function AssessEditor({
 
   // ---- Save --------------------------------------------------------------
 
-  function handleSave() {
-    onSave({
-      foci,
-      notes: notes || undefined,
-      aiSnapshot,
-      priorMeta: priorMeta ?? null,
-    });
+  async function handleSave() {
+    // Guard against rapid double-clicks / touch+click noise. Without
+    // this, two POSTs go to /api/assessments and Airtable gets two
+    // rows for the same photo.
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave({
+        foci,
+        notes: notes || undefined,
+        aiSnapshot,
+        priorMeta: priorMeta ?? null,
+      });
+    } finally {
+      // Reset so the user can retry if the parent surfaced an error.
+      // (If the save succeeded, the parent unmounts this editor.)
+      setSaving(false);
+    }
   }
 
   // ---- Diff vs prior -----------------------------------------------------
@@ -811,9 +823,10 @@ export function AssessEditor({
             </button>
             <button
               onClick={handleSave}
-              className="ml-auto rounded bg-stone-900 px-3 py-1.5 text-sm text-white"
+              disabled={saving}
+              className="ml-auto rounded bg-stone-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
             >
-              Save assessment
+              {saving ? "Saving…" : "Save assessment"}
             </button>
           </div>
         </div>

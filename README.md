@@ -96,13 +96,27 @@ pnpm build        # production build + type check
 ### 4. Deploy
 
 Push to a Vercel project; set the same env vars in the project settings.
-The cron in `vercel.json` runs `/api/cron/daily-weather` at 06:00 UTC daily.
-To trigger it manually:
+The cron in `vercel.json` runs `/api/cron/daily-weather` at **04:00 UTC**
+daily (= 05:00 BST in summer, 04:00 GMT in winter). On each run it:
+
+1. Pulls yesterday's weather actuals from Open-Meteo for every active
+   location and upserts them into Airtable as usual.
+2. Computes the 14-day forecast for each location, picks the peak day,
+   and assembles a single combined `pressure-snapshot/latest.json` in
+   Vercel Blob.
+3. The dashboard reads that blob — no Open-Meteo calls from page
+   loads. Whole-day forecast lives behind one CDN-cached file.
+
+To trigger manually (CLI):
 
 ```bash
 curl -H "Authorization: Bearer $CRON_SECRET" \
      https://your-app.vercel.app/api/cron/daily-weather
 ```
+
+Or click **Refresh now** at the top of the dashboard. That hits
+`/api/snapshot/refresh` (open, 5-min rate-limited per instance) and
+rebuilds the same snapshot on demand.
 
 ---
 
