@@ -35,7 +35,7 @@ const DEFAULT_NEW_RADIUS = 18;
 const BRUSH_RADIUS = 18;
 const BRUSH_MIN_DISTANCE = 26; // mm between dots while brushing
 const MAX_FOCUS_RADIUS = 300; // mm — quarter-image area is ~282mm radius
-const MAGNIFIER_RADIUS = 90;
+const MAGNIFIER_RADIUS = 220; // px on screen (was 90)
 const MAGNIFIER_ZOOM = 5;
 
 export function AssessEditor({
@@ -431,9 +431,10 @@ export function AssessEditor({
           </div>
         )}
 
+        <div className="flex flex-wrap items-start gap-4">
         <div
-          className="relative inline-block w-full overflow-hidden rounded border border-stone-200"
-          style={{ maxWidth: 600 }}
+          className="relative inline-block overflow-hidden rounded border border-stone-200"
+          style={{ flex: "1 1 480px", maxWidth: 600 }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -538,6 +539,19 @@ export function AssessEditor({
               </g>
             ))}
           </svg>
+        </div>
+        {sourceImgReady && sourceImgRef.current && (
+          <FociMagnifier
+            img={sourceImgRef.current}
+            point={hover ?? { x: 500, y: 500 }}
+            cursorActive={!!hover}
+            radius={MAGNIFIER_RADIUS}
+            zoom={MAGNIFIER_ZOOM}
+            foci={previewFoci}
+            priorFoci={showPriorGhost ? (priorFoci ?? null) : null}
+            aiSuggestions={aiSuggestions}
+          />
+        )}
         </div>
 
         <div className="text-xs text-stone-500">
@@ -802,21 +816,6 @@ export function AssessEditor({
           </div>
         </div>
       </aside>
-
-      {/* Fixed magnifier — anchored to the viewport so it stays visible
-          while the user scrolls. Hidden when the cursor isn't over the
-          image. */}
-      {hover && sourceImgReady && sourceImgRef.current && (
-        <FociMagnifier
-          img={sourceImgRef.current}
-          point={hover}
-          radius={MAGNIFIER_RADIUS}
-          zoom={MAGNIFIER_ZOOM}
-          foci={previewFoci}
-          priorFoci={showPriorGhost ? (priorFoci ?? null) : null}
-          aiSuggestions={aiSuggestions}
-        />
-      )}
     </div>
   );
 }
@@ -824,6 +823,7 @@ export function AssessEditor({
 function FociMagnifier({
   img,
   point,
+  cursorActive,
   radius,
   zoom,
   foci,
@@ -832,6 +832,7 @@ function FociMagnifier({
 }: {
   img: HTMLImageElement;
   point: { x: number; y: number };
+  cursorActive: boolean;
   radius: number;
   zoom: number;
   foci: Focus[];
@@ -928,16 +929,20 @@ function FociMagnifier({
 
   return (
     <div
-      className="pointer-events-none fixed right-4 top-24 z-50 flex flex-col items-center"
+      className="flex shrink-0 flex-col items-center gap-1"
       style={{ width: radius * 2 }}
     >
       <canvas
         ref={ref}
-        className="rounded-full border-4 border-white shadow-2xl ring-1 ring-stone-300"
-        style={{ width: radius * 2, height: radius * 2 }}
+        className="rounded-full border-4 border-white shadow-lg ring-1 ring-stone-300 transition-opacity"
+        style={{
+          width: radius * 2,
+          height: radius * 2,
+          opacity: cursorActive ? 1 : 0.6,
+        }}
       />
-      <span className="mt-1 rounded-full bg-stone-900/80 px-2 py-0.5 text-[10px] font-semibold text-white">
-        {zoom}× magnifier
+      <span className="rounded-full bg-stone-900/80 px-2 py-0.5 text-[10px] font-semibold text-white">
+        {zoom}× magnifier{cursorActive ? "" : " · move cursor over image"}
       </span>
     </div>
   );
