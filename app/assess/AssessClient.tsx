@@ -1,39 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { Location } from "@/lib/airtable";
+import { useEffect, useState } from "react";
+import type { Location, PhotoAssessment } from "@/lib/airtable";
 import { rectify, canvasToJpegBlob, type CornerSet } from "@/lib/homography";
+import {
+  AssessEditor,
+  type AiResponse,
+  type Focus,
+  type PriorMeta,
+} from "@/components/AssessEditor";
 import { ImageDropZone } from "@/components/ImageDropZone";
-import { RectifiedCanvasView } from "@/components/RectifiedCanvasView";
 import { diseasePercentFromFoci } from "@/lib/foci-coverage";
 import { PinCanvas } from "./PinCanvas";
-
-type Step =
-  | { kind: "idle" }
-  | { kind: "loaded"; img: HTMLImageElement; exifDate: string | null; fileName: string }
-  | { kind: "pinning"; img: HTMLImageElement; meta: AssessMeta; corners: CornerSet | null }
-  | {
-      kind: "rectified";
-      img: HTMLImageElement;
-      meta: AssessMeta;
-      corners: CornerSet;
-      canvas: HTMLCanvasElement;
-      jpegBase64: string;
-      forwardCoeffs: number[];
-      inverseCoeffs: number[];
-    }
-  | {
-      kind: "analysed";
-      img: HTMLImageElement;
-      meta: AssessMeta;
-      corners: CornerSet;
-      canvas: HTMLCanvasElement;
-      jpegBase64: string;
-      forwardCoeffs: number[];
-      inverseCoeffs: number[];
-      analysis: AnalysisResponse;
-    }
-  | { kind: "saved"; locationId: string };
 
 type AssessMeta = {
   locationId: string;
@@ -43,25 +21,24 @@ type AssessMeta = {
   originalFilename: string;
 };
 
-type Focus = {
-  id: number;
-  x: number;
-  y: number;
-  radius_px: number;
-  confidence?: "low" | "medium" | "high";
+type AssessData = {
+  img: HTMLImageElement;
+  meta: AssessMeta;
+  corners: CornerSet;
+  jpegBase64: string;
+  forwardCoeffs: number[];
+  inverseCoeffs: number[];
+  initialFoci: Focus[];
+  priorFoci: Focus[] | null;
+  priorMeta: PriorMeta | null;
 };
 
-type AnalysisResponse = {
-  result: {
-    foci_count: number;
-    foci?: Focus[];
-    disease_pct: number;
-    reasoning: string;
-    raw_text?: string;
-  };
-  prompt: { version: string; hash: string; sensitivity: number };
-  modelId: string;
-};
+type Step =
+  | { kind: "idle" }
+  | { kind: "loaded"; img: HTMLImageElement; exifDate: string | null; fileName: string }
+  | { kind: "pinning"; img: HTMLImageElement; meta: AssessMeta; corners: CornerSet | null }
+  | { kind: "assess"; data: AssessData }
+  | { kind: "saved"; locationId: string };
 
 const OUTPUT_SIZE = 1000;
 
@@ -97,20 +74,20 @@ export function AssessClient({ locations }: { locations: Location[] }) {
         </div>
       )}
 
-      {(step.kind === "pinning" ||
-        step.kind === "rectified" ||
-        step.kind === "analysed") && (
+      {(step.kind === "pinning" || step.kind === "assess") && (
         <ContextBar
-          meta={step.meta}
+          meta={step.kind === "pinning" ? step.meta : step.data.meta}
           locations={locations}
           onEdit={() => {
-            // Jump back to the loaded step so the user can change the location,
-            // site, or date. The loaded image is preserved.
+            const img =
+              step.kind === "pinning" ? step.img : step.data.img;
+            const meta =
+              step.kind === "pinning" ? step.meta : step.data.meta;
             setStep({
               kind: "loaded",
-              img: step.img,
-              exifDate: step.meta.exifDate,
-              fileName: step.meta.originalFilename,
+              img,
+              exifDate: meta.exifDate,
+              fileName: meta.originalFilename,
             });
           }}
         />
@@ -130,16 +107,16 @@ export function AssessClient({ locations }: { locations: Location[] }) {
               +
               <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-[11px]">
                 V
-              </kbd>
-              {" "}(or{" "}
+              </kbd>{" "}
+              (or{" "}
               <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-[11px]">
                 ⌘
               </kbd>
               +
               <kbd className="rounded border border-stone-300 bg-stone-100 px-1 font-mono text-[11px]">
                 V
-              </kbd>
-              {" "}on Mac), drag a file from a folder, or
+              </kbd>{" "}
+              on Mac), drag a file from a folder, or
             </>
           }
         />
@@ -180,15 +157,59 @@ export function AssessClient({ locations }: { locations: Location[] }) {
               });
               const blob = await canvasToJpegBlob(r.canvas, 0.9);
               const jpegBase64 = await blobToBase64(blob);
+
+              // Look up the prior assessment for the same (location, site)
+              // before this photo's date, in parallel-ish. Best effort —
+              // failures are non-fatal, the operator just gets a blank canvas.
+              setBusy("Looking up previous assessment…");
+              let priorFoci: Focus[] | null = null;
+              let priorMeta: PriorMeta | null = null;
+              let initialFoci: Focus[] = [];
+              try {
+                const url =
+                  `/api/assessments/previous?locationId=${step.meta.locationId}` +
+                  `&quadrat_label=${encodeURIComponent(step.meta.quadratLabel)}` +
+                  `&before=${step.meta.photoDate}`;
+                const res = await fetch(url, { cache: "no-store" });
+                if (res.ok) {
+                  const data = (await res.json()) as {
+                    previous: PhotoAssessment | null;
+                    foci: Focus[];
+                  };
+                  if (data.previous) {
+                    priorMeta = {
+                      id: data.previous.id,
+                      date: data.previous.photo_date,
+                      foci_count: data.previous.foci_count,
+                      disease_pct: data.previous.disease_pct,
+                    };
+                    priorFoci = data.foci.map((f, i) => ({
+                      ...f,
+                      id: i + 1,
+                    }));
+                    // Default behaviour: pre-fill from prior so the operator
+                    // adjusts deltas instead of starting from scratch. They
+                    // can hit Clear all if they want a blank canvas.
+                    initialFoci = priorFoci.map((f) => ({ ...f }));
+                  }
+                }
+              } catch (e) {
+                console.warn("previous-assessment fetch failed", e);
+              }
+
               setStep({
-                kind: "rectified",
-                img: step.img,
-                meta: step.meta,
-                corners,
-                canvas: r.canvas,
-                jpegBase64,
-                forwardCoeffs: r.forwardCoeffs,
-                inverseCoeffs: r.inverseCoeffs,
+                kind: "assess",
+                data: {
+                  img: step.img,
+                  meta: step.meta,
+                  corners,
+                  jpegBase64,
+                  forwardCoeffs: r.forwardCoeffs,
+                  inverseCoeffs: r.inverseCoeffs,
+                  initialFoci,
+                  priorFoci,
+                  priorMeta,
+                },
               });
             } catch (e) {
               setError(`Rectify failed: ${String(e)}`);
@@ -199,122 +220,63 @@ export function AssessClient({ locations }: { locations: Location[] }) {
         />
       )}
 
-      {step.kind === "rectified" && (
-        <RectifiedStep
-          canvas={step.canvas}
+      {step.kind === "assess" && (
+        <AssessEditor
+          jpegBase64={step.data.jpegBase64}
+          initialFoci={step.data.initialFoci}
+          priorFoci={step.data.priorFoci}
+          priorMeta={step.data.priorMeta}
           onBack={() =>
             setStep({
               kind: "pinning",
-              img: step.img,
-              meta: step.meta,
-              corners: step.corners,
+              img: step.data.img,
+              meta: step.data.meta,
+              corners: step.data.corners,
             })
           }
-          onAnalyse={async (sensitivity) => {
-            setError(null);
-            setBusy(`Asking Claude (sensitivity ${sensitivity})…`);
-            try {
-              const r = await fetch("/api/analyse", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  imageBase64: step.jpegBase64,
-                  sensitivity,
-                }),
-              });
-              if (!r.ok) throw new Error(await r.text());
-              const data = (await r.json()) as AnalysisResponse;
-              setStep({
-                kind: "analysed",
-                img: step.img,
-                meta: step.meta,
-                corners: step.corners,
-                canvas: step.canvas,
-                jpegBase64: step.jpegBase64,
-                forwardCoeffs: step.forwardCoeffs,
-                inverseCoeffs: step.inverseCoeffs,
-                analysis: data,
-              });
-            } catch (e) {
-              setError(`Analyse failed: ${String(e)}`);
-            } finally {
-              setBusy(null);
-            }
-          }}
-        />
-      )}
-
-      {step.kind === "analysed" && (
-        <AnalysedStep
-          analysis={step.analysis}
-          jpegBase64={step.jpegBase64}
-          meta={step.meta}
-          onReanalyse={async (sensitivity) => {
-            setBusy(`Re-asking Claude (sensitivity ${sensitivity})…`);
-            try {
-              const r = await fetch("/api/analyse", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  imageBase64: step.jpegBase64,
-                  sensitivity,
-                }),
-              });
-              if (!r.ok) throw new Error(await r.text());
-              const data = (await r.json()) as AnalysisResponse;
-              setStep({ ...step, analysis: data });
-            } catch (e) {
-              setError(`Re-analyse failed: ${String(e)}`);
-            } finally {
-              setBusy(null);
-            }
-          }}
-          onSave={async ({ foci, fociCount, diseasePct, notes }) => {
+          onSave={async ({ foci, notes, aiSnapshot, priorMeta }) => {
             setBusy("Saving to Airtable + Vercel Blob…");
             try {
+              const fociCount = foci.length;
+              const diseasePct = diseasePercentFromFoci(foci);
               const audit = buildAuditJson({
-                meta: step.meta,
-                corners: step.corners,
-                imgWidth: step.img.naturalWidth,
-                imgHeight: step.img.naturalHeight,
-                forwardCoeffs: step.forwardCoeffs,
-                inverseCoeffs: step.inverseCoeffs,
-                modelId: step.analysis.modelId,
-                prompt: step.analysis.prompt,
-                result: step.analysis.result,
-                userOverride: {
-                  foci,
-                  foci_count: fociCount,
-                  disease_pct: diseasePct,
-                },
+                meta: step.data.meta,
+                corners: step.data.corners,
+                imgWidth: step.data.img.naturalWidth,
+                imgHeight: step.data.img.naturalHeight,
+                forwardCoeffs: step.data.forwardCoeffs,
+                inverseCoeffs: step.data.inverseCoeffs,
+                aiSnapshot,
+                userResult: { foci, foci_count: fociCount, disease_pct: diseasePct },
+                priorAssessmentId: priorMeta?.id ?? null,
               });
               const r = await fetch("/api/assessments", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  locationId: step.meta.locationId,
-                  photo_date: step.meta.photoDate,
-                  quadrat_label: step.meta.quadratLabel,
-                  sensitivity: step.analysis.prompt.sensitivity,
-                  rectifiedJpegBase64: step.jpegBase64,
+                  locationId: step.data.meta.locationId,
+                  photo_date: step.data.meta.photoDate,
+                  quadrat_label: step.data.meta.quadratLabel,
+                  sensitivity: aiSnapshot?.prompt?.sensitivity ?? 0,
+                  rectifiedJpegBase64: step.data.jpegBase64,
                   audit,
                   result: {
                     foci_count: fociCount,
                     disease_pct: diseasePct,
-                    reasoning: step.analysis.result.reasoning,
+                    reasoning:
+                      aiSnapshot?.result?.reasoning ?? "operator-marked",
                   },
                   notes,
                 }),
               });
               if (!r.ok) throw new Error(await r.text());
-              setStep({ kind: "saved", locationId: step.meta.locationId });
+              setStep({ kind: "saved", locationId: step.data.meta.locationId });
             } catch (e) {
               setError(`Save failed: ${String(e)}`);
             } finally {
               setBusy(null);
             }
           }}
-          onBack={() => setStep({ ...step, kind: "rectified" })}
         />
       )}
 
@@ -402,13 +364,9 @@ function DateAndLocation({
   const [photoDate, setPhotoDate] = useState(exifDate ?? "");
   const selectedLocation = locations.find((l) => l.id === locationId);
   const sites = selectedLocation?.sites ?? [];
-  // siteSelect is the dropdown value: a site name from the list, or
-  // "__custom__" to enter a free-form label.
   const [siteSelect, setSiteSelect] = useState<string>("");
   const [customSite, setCustomSite] = useState("");
 
-  // When the location changes, reset the chosen site to the first available
-  // option for the new location, or to custom if the location has none.
   useEffect(() => {
     if (sites.length > 0) {
       setSiteSelect(sites[0]);
@@ -576,10 +534,8 @@ function QuickDate({
 }
 
 function ImagePreview({ img }: { img: HTMLImageElement }) {
-  // We have an HTMLImageElement, but its src may be an object URL. Render it
-  // directly via an img tag — clone the element rather than re-using because
-  // React doesn't track non-React img elements.
   return (
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={img.src}
       alt="Photo preview"
@@ -646,340 +602,6 @@ function PinningStep({
   );
 }
 
-function RectifiedStep({
-  canvas,
-  onBack,
-  onAnalyse,
-}: {
-  canvas: HTMLCanvasElement;
-  onBack: () => void;
-  onAnalyse: (sensitivity: number) => void;
-}) {
-  const previewRef = useRef<HTMLDivElement>(null);
-  const [sensitivity, setSensitivity] = useState(3);
-
-  useEffect(() => {
-    const host = previewRef.current;
-    if (!host) return;
-    host.innerHTML = "";
-    const clone = canvas.cloneNode(true) as HTMLCanvasElement;
-    clone.getContext("2d")?.drawImage(canvas, 0, 0);
-    clone.style.width = "100%";
-    clone.style.maxWidth = "500px";
-    clone.style.height = "auto";
-    clone.style.borderRadius = "0.375rem";
-    host.appendChild(clone);
-  }, [canvas]);
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <div className="rounded-lg border border-stone-200 bg-white p-4">
-        <h2 className="mb-2 text-sm font-semibold">Rectified 1m × 1m</h2>
-        <p className="mb-3 text-xs text-stone-500">
-          1000 × 1000 px. Each pixel is 1 mm of real ground.
-        </p>
-        <div ref={previewRef} />
-      </div>
-      <div className="space-y-3 rounded-lg border border-stone-200 bg-white p-4">
-        <h2 className="text-sm font-semibold">Sensitivity</h2>
-        <p className="text-xs text-stone-500">
-          1 = strict (only obvious large lesions). 5 = permissive (count faint
-          early ones).
-        </p>
-        <input
-          type="range"
-          min={1}
-          max={5}
-          step={1}
-          value={sensitivity}
-          onChange={(e) => setSensitivity(Number(e.target.value))}
-          className="w-full"
-        />
-        <div className="flex justify-between text-xs text-stone-500">
-          <span>1 strict</span>
-          <span className="font-semibold text-stone-900">{sensitivity}</span>
-          <span>5 permissive</span>
-        </div>
-        <div className="flex gap-2 pt-2">
-          <button
-            onClick={onBack}
-            className="rounded border border-stone-300 px-4 py-1.5 text-sm"
-          >
-            ← Back to pins
-          </button>
-          <button
-            onClick={() => onAnalyse(sensitivity)}
-            className="ml-auto rounded bg-stone-900 px-4 py-1.5 text-sm text-white"
-          >
-            Analyse with Claude →
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AnalysedStep({
-  analysis,
-  jpegBase64,
-  meta,
-  onReanalyse,
-  onSave,
-  onBack,
-}: {
-  analysis: AnalysisResponse;
-  jpegBase64: string;
-  meta: AssessMeta;
-  onReanalyse: (s: number) => void;
-  onSave: (input: {
-    foci: Focus[];
-    fociCount: number;
-    diseasePct: number;
-    notes?: string;
-  }) => void;
-  onBack: () => void;
-}) {
-  const [sensitivity, setSensitivity] = useState(analysis.prompt.sensitivity);
-  const [notes, setNotes] = useState("");
-  const [editedFoci, setEditedFoci] = useState<Focus[]>(
-    analysis.result.foci ?? []
-  );
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-
-  // Reset edits whenever a fresh analysis comes in (after re-analyse).
-  useEffect(() => {
-    setEditedFoci(analysis.result.foci ?? []);
-    setSelectedId(null);
-  }, [analysis]);
-
-  const editedCount = editedFoci.length;
-  const editedPct = useMemo(
-    () => diseasePercentFromFoci(editedFoci),
-    [editedFoci]
-  );
-
-  const wasEdited = !sameFoci(editedFoci, analysis.result.foci ?? []);
-  const selectedFocus = editedFoci.find((f) => f.id === selectedId) ?? null;
-
-  function updateSelectedRadius(r: number) {
-    if (selectedFocus == null) return;
-    setEditedFoci(
-      editedFoci.map((f) =>
-        f.id === selectedFocus.id ? { ...f, radius_px: r } : f
-      )
-    );
-  }
-
-  function removeSelected() {
-    if (selectedId == null) return;
-    setEditedFoci(editedFoci.filter((f) => f.id !== selectedId));
-    setSelectedId(null);
-  }
-
-  function resetToAi() {
-    setEditedFoci(analysis.result.foci ?? []);
-    setSelectedId(null);
-  }
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <div className="rounded-lg border border-stone-200 bg-white p-4">
-        <h2 className="mb-2 text-sm font-semibold">
-          Rectified — {meta.quadratLabel} ({meta.photoDate})
-        </h2>
-        <RectifiedCanvasView
-          jpegBase64={jpegBase64}
-          foci={editedFoci}
-          fociCount={editedCount}
-          diseasePct={editedPct}
-          maxWidth={520}
-          onFociChange={setEditedFoci}
-          selectedId={selectedId}
-          onSelectChange={setSelectedId}
-        />
-      </div>
-      <div className="space-y-3 rounded-lg border border-stone-200 bg-white p-4">
-        <h2 className="text-sm font-semibold">Result</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <Stat
-            label={wasEdited ? "Foci (edited)" : "Foci"}
-            value={String(editedCount)}
-            sub={
-              wasEdited
-                ? `Claude said ${analysis.result.foci_count}`
-                : undefined
-            }
-          />
-          <Stat
-            label={wasEdited ? "Disease % (edited)" : "Disease coverage"}
-            value={`${editedPct.toFixed(1)}%`}
-            sub={
-              wasEdited
-                ? `Claude said ${analysis.result.disease_pct.toFixed(1)}%`
-                : undefined
-            }
-          />
-        </div>
-        <p className="text-xs text-stone-600 leading-relaxed">
-          <span className="font-medium">Claude's reasoning:</span>{" "}
-          {analysis.result.reasoning || "(none)"}
-        </p>
-        <div className="text-xs text-stone-400">
-          Model: <code>{analysis.modelId}</code> · Prompt:{" "}
-          <code>{analysis.prompt.version}</code> · Sensitivity:{" "}
-          <code>{analysis.prompt.sensitivity}</code>
-        </div>
-
-        <div className="rounded border border-stone-200 bg-stone-50 p-3">
-          <h3 className="text-xs font-semibold text-stone-700">Edit</h3>
-          {selectedFocus ? (
-            <div className="mt-2 space-y-2">
-              <div className="text-xs text-stone-600">
-                Selected focus: <strong>#{selectedFocus.id}</strong> at (
-                {selectedFocus.x}, {selectedFocus.y})
-              </div>
-              <label className="block text-xs text-stone-600">
-                Radius (mm)
-                <input
-                  type="range"
-                  min={3}
-                  max={120}
-                  step={1}
-                  value={selectedFocus.radius_px}
-                  onChange={(e) =>
-                    updateSelectedRadius(Number(e.target.value))
-                  }
-                  className="mt-1 w-full"
-                />
-                <div className="flex justify-between font-mono text-[11px] text-stone-500">
-                  <span>3</span>
-                  <span>{selectedFocus.radius_px}</span>
-                  <span>120</span>
-                </div>
-              </label>
-              <button
-                onClick={removeSelected}
-                className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-              >
-                Remove focus #{selectedFocus.id}
-              </button>
-            </div>
-          ) : (
-            <p className="mt-1 text-xs text-stone-500">
-              Click a focus to adjust its size or remove it. Click empty area
-              of the image to add a new focus. Disease grows in concentric
-              rings — drag the radius slider as the patches expand.
-            </p>
-          )}
-          {wasEdited && (
-            <button
-              onClick={resetToAi}
-              className="mt-2 rounded border border-stone-300 px-2 py-1 text-xs"
-            >
-              Reset to Claude's output
-            </button>
-          )}
-        </div>
-
-        <div className="border-t border-stone-200 pt-3">
-          <label className="block text-xs font-medium text-stone-600">
-            Re-analyse at different sensitivity (clears manual edits)
-          </label>
-          <input
-            type="range"
-            min={1}
-            max={5}
-            step={1}
-            value={sensitivity}
-            onChange={(e) => setSensitivity(Number(e.target.value))}
-            className="w-full"
-          />
-          <div className="flex justify-between text-xs text-stone-500">
-            <span>1</span>
-            <span>{sensitivity}</span>
-            <span>5</span>
-          </div>
-          <button
-            onClick={() => onReanalyse(sensitivity)}
-            className="mt-2 rounded border border-stone-300 px-3 py-1 text-xs"
-          >
-            Re-analyse
-          </button>
-        </div>
-
-        <div className="border-t border-stone-200 pt-3">
-          <label className="block text-xs font-medium text-stone-600">
-            Notes (optional)
-          </label>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={2}
-            className="mt-1 w-full rounded border border-stone-300 px-2 py-1 text-sm"
-          />
-        </div>
-
-        <div className="flex gap-2 pt-2">
-          <button
-            onClick={onBack}
-            className="rounded border border-stone-300 px-4 py-1.5 text-sm"
-          >
-            ← Back
-          </button>
-          <button
-            onClick={() =>
-              onSave({
-                foci: editedFoci,
-                fociCount: editedCount,
-                diseasePct: editedPct,
-                notes: notes || undefined,
-              })
-            }
-            className="ml-auto rounded bg-stone-900 px-4 py-1.5 text-sm text-white"
-          >
-            Save assessment
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function sameFoci(a: Focus[], b: Focus[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (
-      a[i].id !== b[i].id ||
-      a[i].x !== b[i].x ||
-      a[i].y !== b[i].y ||
-      a[i].radius_px !== b[i].radius_px
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function Stat({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-}) {
-  return (
-    <div className="rounded bg-stone-50 p-2">
-      <div className="text-xs uppercase tracking-wide text-stone-500">
-        {label}
-      </div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-      {sub && <div className="text-[10px] text-stone-500">{sub}</div>}
-    </div>
-  );
-}
-
 // ---- Helpers --------------------------------------------------------------
 
 async function loadFile(
@@ -993,8 +615,6 @@ async function loadFile(
     blob = Array.isArray(result) ? result[0] : result;
   }
 
-  // EXIF detection (parse the original file, not the converted blob, so we
-  // get DateTimeOriginal even from HEIC).
   let exifDate: string | null = null;
   try {
     const { default: exifr } = await import("exifr");
@@ -1044,19 +664,9 @@ function buildAuditJson(input: {
   imgHeight: number;
   forwardCoeffs: number[];
   inverseCoeffs: number[];
-  modelId: string;
-  prompt: { version: string; hash: string; sensitivity: number };
-  result: {
-    foci_count: number;
-    foci?: Focus[];
-    disease_pct: number;
-    reasoning: string;
-  };
-  userOverride?: {
-    foci: Focus[];
-    foci_count: number;
-    disease_pct: number;
-  } | null;
+  aiSnapshot: AiResponse | null;
+  userResult: { foci: Focus[]; foci_count: number; disease_pct: number };
+  priorAssessmentId: string | null;
 }) {
   return {
     timestamp_iso: new Date().toISOString(),
@@ -1076,17 +686,21 @@ function buildAuditJson(input: {
     rectified_represents_m: [1.0, 1.0],
     homography_forward_coeffs: input.forwardCoeffs,
     homography_inverse_coeffs: input.inverseCoeffs,
-    model_id: input.modelId,
-    prompt_version: input.prompt.version,
-    prompt_hash: input.prompt.hash,
-    sensitivity_setting: input.prompt.sensitivity,
-    parsed: {
-      foci_count: input.result.foci_count,
-      foci: input.result.foci ?? [],
-      disease_pct: input.result.disease_pct,
-      reasoning: input.result.reasoning,
-    },
-    user_override: input.userOverride ?? null,
+    // AI run snapshot (null if the operator never invoked the AI helper).
+    model_id: input.aiSnapshot?.modelId ?? null,
+    prompt_version: input.aiSnapshot?.prompt.version ?? null,
+    prompt_hash: input.aiSnapshot?.prompt.hash ?? null,
+    sensitivity_setting: input.aiSnapshot?.prompt.sensitivity ?? null,
+    parsed: input.aiSnapshot
+      ? {
+          foci_count: input.aiSnapshot.result.foci_count,
+          foci: input.aiSnapshot.result.foci ?? [],
+          disease_pct: input.aiSnapshot.result.disease_pct,
+          reasoning: input.aiSnapshot.result.reasoning,
+        }
+      : null,
+    user_override: input.userResult,
+    prior_assessment_id: input.priorAssessmentId,
   };
 }
 

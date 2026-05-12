@@ -18,8 +18,8 @@ const COLOURS: Record<CornerKey, string> = {
   bl: "#f59e0b",
 };
 
-const MAGNIFIER_RADIUS = 60;
-const MAGNIFIER_ZOOM = 4;
+const MAGNIFIER_RADIUS = 220;
+const MAGNIFIER_ZOOM = 5;
 
 export function PinCanvas({
   img,
@@ -113,9 +113,11 @@ export function PinCanvas({
         </span>
       </div>
 
+      <div className="flex flex-wrap items-start gap-3">
       <div
         ref={containerRef}
-        className="relative max-h-[70vh] overflow-auto rounded border border-stone-200 bg-stone-900"
+        className="relative max-h-[70vh] flex-1 overflow-auto rounded border border-stone-200 bg-stone-900"
+        style={{ minWidth: 280 }}
       >
         <div
           className="relative inline-block select-none"
@@ -175,16 +177,13 @@ export function PinCanvas({
             </svg>
           )}
         </div>
-
-        {/* Magnifier — fixed corner overlay, shows pixels under the cursor */}
-        {hover && (
-          <Magnifier
-            img={img}
-            point={hover}
-            radius={MAGNIFIER_RADIUS}
-            zoom={MAGNIFIER_ZOOM}
-          />
-        )}
+      </div>
+      <Magnifier
+        img={img}
+        point={hover}
+        radius={MAGNIFIER_RADIUS}
+        zoom={MAGNIFIER_ZOOM}
+      />
       </div>
 
       <div className="flex flex-wrap gap-2 text-xs">
@@ -215,11 +214,16 @@ function Magnifier({
   zoom,
 }: {
   img: HTMLImageElement;
-  point: Point;
+  point: Point | null;
   radius: number;
   zoom: number;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  // Default to image centre when there's no live cursor position so the
+  // panel always shows something.
+  const target = point ?? { x: img.naturalWidth / 2, y: img.naturalHeight / 2 };
+  const cursorActive = !!point;
+
   useEffect(() => {
     const c = ref.current;
     if (!c) return;
@@ -233,8 +237,8 @@ function Magnifier({
     ctx.clearRect(0, 0, size, size);
     ctx.drawImage(
       img,
-      point.x - sourceSize / 2,
-      point.y - sourceSize / 2,
+      target.x - sourceSize / 2,
+      target.y - sourceSize / 2,
       sourceSize,
       sourceSize,
       0,
@@ -251,13 +255,25 @@ function Magnifier({
     ctx.moveTo(0, size / 2);
     ctx.lineTo(size, size / 2);
     ctx.stroke();
-  }, [img, point, radius, zoom]);
+  }, [img, target.x, target.y, radius, zoom]);
 
   return (
-    <canvas
-      ref={ref}
-      className="pointer-events-none absolute right-3 top-3 rounded-full border-2 border-white shadow-lg"
-      style={{ width: radius * 2, height: radius * 2 }}
-    />
+    <div
+      className="sticky top-4 flex shrink-0 flex-col items-center gap-1 self-start"
+      style={{ width: radius * 2 }}
+    >
+      <canvas
+        ref={ref}
+        className="rounded-full border-4 border-white shadow-lg ring-1 ring-stone-300 transition-opacity"
+        style={{
+          width: radius * 2,
+          height: radius * 2,
+          opacity: cursorActive ? 1 : 0.6,
+        }}
+      />
+      <span className="rounded-full bg-stone-900/80 px-2 py-0.5 text-[10px] font-semibold text-white">
+        {zoom}× magnifier{cursorActive ? "" : " · move cursor over image"}
+      </span>
+    </div>
   );
 }
