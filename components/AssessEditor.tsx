@@ -398,7 +398,7 @@ export function AssessEditor({
   // ---- Render ------------------------------------------------------------
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_480px]">
       {/* Canvas column */}
       <div className="space-y-3 rounded-lg border border-stone-200 bg-white p-4">
         {priorMeta && (
@@ -431,10 +431,9 @@ export function AssessEditor({
           </div>
         )}
 
-        <div className="flex flex-wrap items-start gap-4">
         <div
           className="relative inline-block overflow-hidden rounded border border-stone-200"
-          style={{ flex: "1 1 480px", maxWidth: 600 }}
+          style={{ maxWidth: 600 }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -540,19 +539,6 @@ export function AssessEditor({
             ))}
           </svg>
         </div>
-        {sourceImgReady && sourceImgRef.current && (
-          <FociMagnifier
-            img={sourceImgRef.current}
-            point={hover ?? { x: 500, y: 500 }}
-            cursorActive={!!hover}
-            radius={MAGNIFIER_RADIUS}
-            zoom={MAGNIFIER_ZOOM}
-            foci={previewFoci}
-            priorFoci={showPriorGhost ? (priorFoci ?? null) : null}
-            aiSuggestions={aiSuggestions}
-          />
-        )}
-        </div>
 
         <div className="text-xs text-stone-500">
           Mark tool: tap empty area to drop a focus, tap a focus to select,
@@ -564,6 +550,22 @@ export function AssessEditor({
 
       {/* Side panel */}
       <aside className="space-y-3">
+        {/* Magnifier — sticky at top of the side panel so it stays in
+            view while you scroll through the tools below. */}
+        {sourceImgReady && sourceImgRef.current && (
+          <div className="sticky top-4 z-10 flex justify-center rounded-lg border border-stone-200 bg-white p-3 shadow-sm">
+            <FociMagnifier
+              img={sourceImgRef.current}
+              point={hover ?? { x: 500, y: 500 }}
+              cursorActive={!!hover}
+              radius={MAGNIFIER_RADIUS}
+              zoom={MAGNIFIER_ZOOM}
+              foci={previewFoci}
+              priorFoci={showPriorGhost ? (priorFoci ?? null) : null}
+              aiSuggestions={aiSuggestions}
+            />
+          </div>
+        )}
         {/* Stats */}
         <div className="rounded-lg border border-stone-200 bg-white p-3">
           <div className="grid grid-cols-2 gap-3">
@@ -929,7 +931,7 @@ function FociMagnifier({
 
   return (
     <div
-      className="sticky top-4 flex shrink-0 flex-col items-center gap-1 self-start"
+      className="flex shrink-0 flex-col items-center gap-1"
       style={{ width: radius * 2 }}
     >
       <canvas
