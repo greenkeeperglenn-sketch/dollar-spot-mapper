@@ -929,7 +929,7 @@ function FociMagnifier({
 
   return (
     <div
-      className="flex shrink-0 flex-col items-center gap-1"
+      className="sticky top-4 flex shrink-0 flex-col items-center gap-1 self-start"
       style={{ width: radius * 2 }}
     >
       <canvas
