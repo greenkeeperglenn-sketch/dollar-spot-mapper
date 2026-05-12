@@ -5,7 +5,14 @@
 //                        on the base.
 //   AIRTABLE_BASE_ID   - appXXXXXXXXXXXXXX
 
+import { revalidateTag } from "next/cache";
 import { bandFor, type RiskBand } from "./smith-kerns";
+
+// Tag every Airtable read with this so we can blow the whole cache
+// after a write. 30s freshness with explicit invalidation is plenty
+// for our use case and slashes the call volume.
+const AIRTABLE_CACHE_TAG = "airtable";
+const AIRTABLE_REVALIDATE_S = 30;
 
 const API = "https://api.airtable.com/v0";
 
@@ -93,6 +100,8 @@ async function request<T>(
       else url.searchParams.set(k, v);
     }
   }
+  const method = (init.method ?? "GET").toUpperCase();
+  const isRead = method === "GET";
   const res = await fetch(url, {
     ...init,
     headers: {
@@ -100,7 +109,17 @@ async function request<T>(
       "Content-Type": "application/json",
       ...(init.headers ?? {}),
     },
-    cache: "no-store",
+    // Reads share a small TTL + a tag so we don't refetch the same data
+    // multiple times in a single dashboard render. Writes stay
+    // unconditional and blow the read cache afterwards.
+    ...(isRead
+      ? {
+          next: {
+            revalidate: AIRTABLE_REVALIDATE_S,
+            tags: [AIRTABLE_CACHE_TAG],
+          },
+        }
+      : { cache: "no-store" as const }),
   });
   if (!res.ok) {
     const body = await res.text();
@@ -121,6 +140,17 @@ async function request<T>(
       // body wasn't JSON; keep raw
     }
     throw new Error(`Airtable ${res.status} on ${path}: ${pretty}`);
+  }
+  if (!isRead) {
+    // After any successful write, blow the read cache so the next GET
+    // sees the fresh state instead of a 30s-old snapshot.
+    try {
+      // Next 16: second arg is required; "max" = stale-while-revalidate.
+      revalidateTag(AIRTABLE_CACHE_TAG, "max");
+    } catch {
+      /* revalidateTag is a no-op outside server actions in some
+         contexts; ignore. */
+    }
   }
   return res.json() as Promise<T>;
 }

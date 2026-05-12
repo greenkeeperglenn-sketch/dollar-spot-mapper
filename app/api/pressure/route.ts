@@ -14,6 +14,14 @@ const MAX_FORECAST_DAYS = 16;
 // Cap auto-catch-up so a long gap doesn't stall the dashboard. Anything
 // bigger than this means the user should run the manual backfill button.
 const MAX_AUTO_CATCH_UP_DAYS = 30;
+// Don't run catch-up more than once per location per CATCH_UP_TTL_MS. The
+// daily cron writes yesterday's reading, and rapid dashboard reloads /
+// range-switches otherwise re-hit Open-Meteo + Airtable for nothing. This
+// is in-memory per process — survives across requests on warm serverless
+// instances and resets on cold start (which is fine, that just means one
+// extra real catch-up per cold-start).
+const CATCH_UP_TTL_MS = 30 * 60 * 1000;
+const recentlyCaughtUp = new Map<string, number>();
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -46,7 +54,13 @@ export async function GET(req: Request) {
       let caughtUpDays = 0;
       let catchUpError: string | null = null;
 
-      if (loc && (!latestStored || latestStored < yesterday)) {
+      const lastRun = recentlyCaughtUp.get(locationId) ?? 0;
+      const skipCatchUp = Date.now() - lastRun < CATCH_UP_TTL_MS;
+      if (
+        loc &&
+        !skipCatchUp &&
+        (!latestStored || latestStored < yesterday)
+      ) {
         const desiredStart = latestStored
           ? addDays(latestStored, 1)
           : addDays(yesterday, -MAX_AUTO_CATCH_UP_DAYS);
@@ -59,6 +73,7 @@ export async function GET(req: Request) {
               endDate: yesterday,
             });
             caughtUpDays = summary.pressureRowsWritten;
+            recentlyCaughtUp.set(locationId, Date.now());
             // Re-read so the response reflects the new rows.
             actuals = await listPressureForLocation(locationId, {
               sinceDate: since,
